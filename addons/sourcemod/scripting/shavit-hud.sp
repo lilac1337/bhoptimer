@@ -2153,7 +2153,7 @@ void UpdateTopLeftHUD(int client, bool wait)
 				return;
 			}
 
-			SetHudTextParams(0.01, 0.01, 2.6, 255, 255, 255, 255, 0, 0.0, 0.0, 0.0);
+			SetHudTextParams(0.01, 0.01, 2.6, 245, 169, 184, 255, 0, 0.0, 0.0, 0.0);
 
 			if (gB_DynamicChannels)
 			{
