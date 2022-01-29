@@ -41,9 +41,9 @@
 			// search string "#SFUI_Notice_SprayPaint_TooClose" to find IsAbleToApplySpray and then go to the next function to find GetPlayerMaxSpeed. Then calculate the vtable offset.
 			"CCSPlayer::GetPlayerMaxSpeed"
 			{
-				"windows"   "505"
-				"linux"     "506"
-				"mac"       "506"
+				"windows"   "506"
+				"linux"     "507"
+				"mac"       "507"
 			}
 			// add 1 to the css offset and hope it works
 			"CGameRules::IsSpawnPointValid"
@@ -63,8 +63,14 @@
 			// then find the vtable from references and CBasePlayer::UpdateStepSound is right before PlayStepSound
 			"CBasePlayer::UpdateStepSound"
 			{
-				"windows"   "408"
-				"linux"     "409"
+				"windows"   "409"
+				"linux"     "410"
+			}
+			// TODO
+			"m_surfaceFriction"
+			{
+				"windows"   "8"
+				"linux"     "8"
 			}
 		}
 
@@ -128,6 +134,12 @@
 			{
 				"windows"   "358"
 				"linux"     "359"
+			}
+			// TODO
+			"m_surfaceFriction"
+			{
+				"windows"   "104"
+				"linux"     "104"
 			}
 		}
 
