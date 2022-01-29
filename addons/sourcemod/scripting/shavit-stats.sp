@@ -299,7 +299,7 @@ public Action Command_Profile(int client, int args)
 			return Plugin_Handled;
 		}
 	}
-	
+
 	gI_TargetSteamID[client] = GetSteamAccountID(target);
 
 	return OpenStatsMenu(client, gI_TargetSteamID[client]);
@@ -318,22 +318,22 @@ Action OpenStatsMenu(int client, int steamid)
 
 	if(gB_Rankings)
 	{
-		FormatEx(sQuery, 2048, "SELECT a.clears, b.maps, c.wrs, d.name, d.ip, d.lastlogin, d.points, d.playtime, e.rank FROM " ...
+		FormatEx(sQuery, 2048, "SELECT a.clears, b.maps, c.wrs, d.name, d.ip, d.lastlogin, d.points, e.rank FROM " ...
 				"(SELECT COUNT(*) clears FROM (SELECT map FROM %splayertimes WHERE auth = %d AND track = 0 GROUP BY map) s) a " ...
 				"JOIN (SELECT COUNT(*) maps FROM (SELECT map FROM %smapzones WHERE track = 0 AND type = 0 GROUP BY map) s) b " ...
 				"JOIN (SELECT COUNT(*) wrs FROM %swrs WHERE auth = %d AND track = 0 AND style = 0) c " ...
-				"JOIN (SELECT name, ip, lastlogin, playtime, FORMAT(points, 2) points FROM %susers WHERE auth = %d) d " ...
+				"JOIN (SELECT name, ip, lastlogin, FORMAT(points, 2) points FROM %susers WHERE auth = %d) d " ...
 				"JOIN (SELECT COUNT(*) as 'rank' FROM %susers as u1 JOIN (SELECT points FROM %susers WHERE auth = %d) u2 WHERE u1.points >= u2.points) e " ...
 			"LIMIT 1;", gS_MySQLPrefix, steamid, gS_MySQLPrefix, gS_MySQLPrefix, steamid, gS_MySQLPrefix, steamid, gS_MySQLPrefix, gS_MySQLPrefix, steamid);
 	}
 
 	else
 	{
-		FormatEx(sQuery, 2048, "SELECT a.clears, b.maps, c.wrs, d.name, d.ip, d.lastlogin, d.playtime FROM " ...
+		FormatEx(sQuery, 2048, "SELECT a.clears, b.maps, c.wrs, d.name, d.ip, d.lastlogin FROM " ...
 				"(SELECT COUNT(*) clears FROM (SELECT map FROM %splayertimes WHERE auth = %d AND track = 0 GROUP BY map) s) a " ...
 				"JOIN (SELECT COUNT(*) maps FROM (SELECT map FROM %smapzones WHERE track = 0 AND type = 0 GROUP BY map) s) b " ...
 				"JOIN (SELECT COUNT(*) wrs FROM %swrs WHERE auth = %d AND track = 0 AND style = 0) c " ...
-				"JOIN (SELECT name, ip, lastlogin, playtime FROM %susers WHERE auth = %d) d " ...
+				"JOIN (SELECT name, ip, lastlogin FROM %susers WHERE auth = %d) d " ...
 			"LIMIT 1;", gS_MySQLPrefix, steamid, gS_MySQLPrefix, gS_MySQLPrefix, steamid, gS_MySQLPrefix, steamid);
 	}
 
@@ -384,19 +384,14 @@ public void OpenStatsMenuCallback(Database db, DBResultSet results, const char[]
 		char sLastLogin[32];
 		FormatTime(sLastLogin, 32, "%Y-%m-%d %H:%M:%S", iLastLogin);
 		Format(sLastLogin, 32, "%T: %s", "LastLogin", client, (iLastLogin != -1)? sLastLogin:"N/A");
-	
-		int iPlaytime = results.FetchInt(7);
-		char sPlaytime[64];
-		FormatPlayTime(iPlaytime, sPlaytime, 64);
-		Format(sPlaytime, 64, "%T: %s", "Playtime", client, (iPlaytime != -1)? sPlaytime:"N/A");
-		
+
 		char sPoints[16];
 		char sRank[16];
 
 		if(gB_Rankings)
 		{
 			results.FetchString(6, sPoints, 16);
-			results.FetchString(8, sRank, 16);
+			results.FetchString(7, sRank, 16);
 		}
 
 		char sRankingString[64];
@@ -423,8 +418,8 @@ public void OpenStatsMenuCallback(Database db, DBResultSet results, const char[]
 		FormatEx(sClearString, 128, "%T: %d/%d (%.01f%%)", "MapCompletions", client, iClears, iTotalMaps, ((float(iClears) / iTotalMaps) * 100.0));
 
 		Menu menu = new Menu(MenuHandler_ProfileHandler);
-		menu.SetTitle("%s's %T. [U:1:%d]\n%T: %s\n%s\n%s\n%s\n[%s] %T: %d%s\n",
-			gS_TargetName[client], "Profile", client, gI_TargetSteamID[client], "Country", client, sCountry, sLastLogin, sPlaytime, sClearString,
+		menu.SetTitle("%s's %T. [U:1:%d]\n%T: %s\n%s\n%s\n[%s] %T: %d%s\n",
+			gS_TargetName[client], "Profile", client, gI_TargetSteamID[client], "Country", client, sCountry, sLastLogin, sClearString,
 			gS_StyleStrings[0].sStyleName, "WorldRecords", client, iWRs, sRankingString);
 
 		int[] styles = new int[gI_Styles];
@@ -824,31 +819,4 @@ public int Native_OpenStatsMenu(Handle handler, int numParams)
 	gI_TargetSteamID[client] = GetNativeCell(2);
 
 	OpenStatsMenu(client, gI_TargetSteamID[client]);
-}
-
-void FormatPlayTime(int time, char[] newtime, int newtimesize){
-	int iSeconds = (time % 60);
-
-	if(time < 60.0){
-		FormatEx(newtime, newtimesize, "%ds", iSeconds);
-	}else{
-		int iMinutes = (time / 60);
-
-		if(time < 3600.0){
-			FormatEx(newtime, newtimesize, "%dm%s%ds",
-				iMinutes,
-				((iSeconds < 10) ? "0" : ""),
-				iSeconds);
-		}else{
-			iMinutes %= 60;
-			int iHours = (time / 3600);
-
-			FormatEx(newtime, newtimesize, "%dh%s%dm%s%ds",
-				iHours,
-				((iMinutes < 10) ? "0" : ""),
-				iMinutes,
-				((iSeconds < 10) ? "0" : ""),
-				iSeconds);
-		}
-	}
 }
