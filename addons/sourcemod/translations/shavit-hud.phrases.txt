@@ -45,7 +45,7 @@
 	}
 	"HudBestText"
 	{
-		"en"		"Best"
+		"en"		"PB"
 	}
 	"HudJumpsText"
 	{
