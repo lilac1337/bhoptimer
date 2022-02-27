@@ -177,6 +177,8 @@ public void OnPluginStart()
 	sv_cheats = FindConVar("sv_cheats");
 	sv_disable_immunity_alpha = FindConVar("sv_disable_immunity_alpha");
 
+	RegAdminCmd("sm_maptimer_checkpoints", Command_MaptimerCheckpoints, ADMFLAG_RCON, "kz_bhop_yonkoma");
+
 	// spectator list
 	RegConsoleCmd("sm_specs", Command_Specs, "Show a list of spectators.");
 	RegConsoleCmd("sm_spectators", Command_Specs, "Show a list of spectators.");
@@ -1296,13 +1298,24 @@ public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float 
 			float fSpeed[3];
 			GetEntPropVector(client, Prop_Data, "m_vecAbsVelocity", fSpeed);
 			float fSpeedXY = (SquareRoot(Pow(fSpeed[0], 2.0) + Pow(fSpeed[1], 2.0)));
-			float fScale = (prespeed_ez_vel / fSpeedXY);
 
-			if (fSpeedXY >= 1.0 && fScale > 1.0)
+			if (fSpeedXY < prespeed_ez_vel)
 			{
-				float z = fSpeed[2];
-				ScaleVector(fSpeed, fScale);
-				fSpeed[2] = z;
+				float theta;
+
+				if (fSpeedXY >= 1.0)
+				{
+					float direction[3];
+					GetVectorAngles(fSpeed, direction);
+					theta = DegToRad(direction[1]);
+				}
+				else
+				{
+					theta = DegToRad(angles[1]);
+				}
+
+				fSpeed[0] = prespeed_ez_vel * Cosine(theta);
+				fSpeed[1] = prespeed_ez_vel * Sine(theta);
 				DumbSetVelocity(client, fSpeed);
 			}
 		}
@@ -1893,6 +1906,27 @@ public bool Shavit_OnStopPre(int client, int track)
 	}
 
 	return true;
+}
+
+public Action Command_MaptimerCheckpoints(int client, int args)
+{
+	if (client == 0 && args == 1)
+	{
+		char arg[8];
+		GetCmdArg(1, arg, sizeof(arg));
+		static float starttime;
+
+		if (StringToInt(arg) == 0)
+		{
+			starttime = GetGameTime();
+		}
+		else
+		{
+			Shavit_PrintToChatAll("Nice! That took %s%.3fs", gS_ChatStrings.sVariable, GetGameTime()-starttime);
+		}
+	}
+
+	return Plugin_Handled;
 }
 
 public Action Command_Noclip(int client, int args)
