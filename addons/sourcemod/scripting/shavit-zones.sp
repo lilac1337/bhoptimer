@@ -27,6 +27,7 @@
 
 #include <shavit/core>
 #include <shavit/zones>
+#include <shavit/physicsuntouch>
 
 #undef REQUIRE_PLUGIN
 #include <adminmenu>
@@ -35,6 +36,7 @@
 #undef REQUIRE_EXTENSIONS
 #include <cstrike>
 #include <tf2>
+#include <eventqueuefix>
 
 #pragma semicolon 1
 #pragma newdecls required
@@ -91,6 +93,8 @@ int gI_GridSnap[MAXPLAYERS+1];
 bool gB_SnapToWall[MAXPLAYERS+1];
 bool gB_CursorTracing[MAXPLAYERS+1];
 
+int gI_LatestTeleportTick[MAXPLAYERS+1];
+
 // player zone status
 bool gB_InsideZone[MAXPLAYERS+1][ZONETYPES_SIZE][TRACKS_SIZE];
 bool gB_InsideZoneID[MAXPLAYERS+1][MAX_ZONES];
@@ -135,6 +139,12 @@ Convar gCV_BoxOffset = null;
 Convar gCV_ExtraSpawnHeight = null;
 Convar gCV_PrebuiltVisualOffset = null;
 
+Convar gCV_ForceTargetnameReset = null;
+Convar gCV_ResetTargetnameMain = null;
+Convar gCV_ResetTargetnameBonus = null;
+Convar gCV_ResetClassnameMain = null;
+Convar gCV_ResetClassnameBonus = null;
+
 // handles
 Handle gH_DrawVisible = null;
 Handle gH_DrawAllZones = null;
@@ -153,6 +163,12 @@ Handle gH_Forwards_EnterZone = null;
 Handle gH_Forwards_LeaveZone = null;
 Handle gH_Forwards_StageMessage = null;
 
+// sdkcalls
+Handle gH_PhysicsRemoveTouchedList = null;
+
+// dhooks
+DynamicHook gH_TeleportDhook = null;
+
 // kz support
 float gF_ClimbButtonCache[MAXPLAYERS+1][TRACKS_SIZE][2][3]; // 0 - location, 1 - angles
 
@@ -162,6 +178,8 @@ bool gB_StartAnglesOnly[MAXPLAYERS+1][TRACKS_SIZE];
 float gF_StartPos[MAXPLAYERS+1][TRACKS_SIZE][3];
 float gF_StartAng[MAXPLAYERS+1][TRACKS_SIZE][3];
 
+// modules
+bool gB_Eventqueuefix = false;
 bool gB_ReplayRecorder = false;
 
 // custom zone stuff
@@ -301,6 +319,12 @@ public void OnPluginStart()
 	gCV_ExtraSpawnHeight = new Convar("shavit_zones_extra_spawn_height", "0.0", "YOU DONT NEED TO TOUCH THIS USUALLY. FIX YOUR ACTUAL ZONES.\nUsed to fix some shit prebuilt zones that are in the ground like bhop_strafecontrol");
 	gCV_PrebuiltVisualOffset = new Convar("shavit_zones_prebuilt_visual_offset", "0", "YOU DONT NEED TO TOUCH THIS USUALLY.\nUsed to fix the VISUAL beam offset for prebuilt zones on a map.\nExample maps you'd want to use 16 on: bhop_tranquility and bhop_amaranthglow");
 
+	gCV_ForceTargetnameReset = new Convar("shavit_zones_forcetargetnamereset", "0", "Reset the player's targetname upon timer start?\nRecommended to leave disabled. Enable via per-map configs when necessary.\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
+	gCV_ResetTargetnameMain = new Convar("shavit_zones_resettargetname_main", "", "What targetname to use when resetting the player.\nWould be applied once player teleports to the start zone or on every start if shavit_zones_forcetargetnamereset cvar is set to 1.\nYou don't need to touch this");
+	gCV_ResetTargetnameBonus = new Convar("shavit_zones_resettargetname_bonus", "", "What targetname to use when resetting the player (on bonus tracks).\nWould be applied once player teleports to the start zone or on every start if shavit_zones_forcetargetnamereset cvar is set to 1.\nYou don't need to touch this");
+	gCV_ResetClassnameMain = new Convar("shavit_zones_resetclassname_main", "", "What classname to use when resetting the player.\nWould be applied once player teleports to the start zone or on every start if shavit_zones_forcetargetnamereset cvar is set to 1.\nYou don't need to touch this");
+	gCV_ResetClassnameBonus = new Convar("shavit_zones_resetclassname_bonus", "", "What classname to use when resetting the player (on bonus tracks).\nWould be applied once player teleports to the start zone or on every start if shavit_zones_forcetargetnamereset cvar is set to 1.\nYou don't need to touch this");
+
 	gCV_Interval.AddChangeHook(OnConVarChanged);
 	gCV_UseCustomSprite.AddChangeHook(OnConVarChanged);
 	gCV_Offset.AddChangeHook(OnConVarChanged);
@@ -308,7 +332,9 @@ public void OnPluginStart()
 	gCV_BoxOffset.AddChangeHook(OnConVarChanged);
 
 	Convar.AutoExecConfig();
-
+	
+	LoadDHooks();
+	
 	// misc cvars
 	sv_gravity = FindConVar("sv_gravity");
 
@@ -332,6 +358,7 @@ public void OnPluginStart()
 	}
 
 	gB_ReplayRecorder = LibraryExists("shavit-replay-recorder");
+	gB_Eventqueuefix = LibraryExists("eventqueuefix");
 
 	if (gB_Late)
 	{
@@ -343,6 +370,7 @@ public void OnPluginStart()
 			if (IsValidClient(i))
 			{
 				OnClientConnected(i);
+				OnClientPutInServer(i);
 
 				if (AreClientCookiesCached(i) && !IsFakeClient(i))
 				{
@@ -356,6 +384,70 @@ public void OnPluginStart()
 public void OnPluginEnd()
 {
 	UnloadZones(0);
+}
+
+void LoadDHooks()
+{
+	Handle hGameData = LoadGameConfigFile("shavit.games");
+	
+	if (hGameData == null)
+	{
+		SetFailState("Failed to load shavit gamedata");
+	}
+	
+	LoadPhysicsUntouch(hGameData);
+	
+	if (gEV_Type == Engine_CSGO)
+	{
+		StartPrepSDKCall(SDKCall_Entity);
+	}
+	else
+	{
+		StartPrepSDKCall(SDKCall_Static);
+	}
+	
+	if (!PrepSDKCall_SetFromConf(hGameData, SDKConf_Signature, "PhysicsRemoveTouchedList"))
+	{
+		SetFailState("Failed to find \"PhysicsRemoveTouchedList\" signature!");
+	}
+	
+	if (gEV_Type != Engine_CSGO)
+	{
+		PrepSDKCall_AddParameter(SDKType_CBaseEntity, SDKPass_Pointer);
+	}
+	
+	gH_PhysicsRemoveTouchedList = EndPrepSDKCall();
+	
+	if (!gH_PhysicsRemoveTouchedList)
+	{
+		SetFailState("Failed to create sdkcall to \"PhysicsRemoveTouchedList\"!");
+	}
+	
+	delete hGameData;
+	
+	hGameData = LoadGameConfigFile("sdktools.games");
+	if (hGameData == null)
+	{
+		SetFailState("Failed to load sdktools gamedata");
+	}
+	
+	int iOffset = GameConfGetOffset(hGameData, "Teleport");
+	if (iOffset == -1)
+	{
+		SetFailState("Couldn't get the offset for \"Teleport\"!");
+	}
+	
+	gH_TeleportDhook = new DynamicHook(iOffset, HookType_Entity, ReturnType_Void, ThisPointer_CBaseEntity);
+	
+	gH_TeleportDhook.AddParam(HookParamType_VectorPtr);
+	gH_TeleportDhook.AddParam(HookParamType_VectorPtr);
+	gH_TeleportDhook.AddParam(HookParamType_VectorPtr);
+	if (GetEngineVersion() == Engine_CSGO)
+	{
+		gH_TeleportDhook.AddParam(HookParamType_Bool);
+	}
+	
+	delete hGameData;
 }
 
 public void OnAllPluginsLoaded()
@@ -380,6 +472,10 @@ public void OnLibraryAdded(const char[] name)
 	{
 		gB_ReplayRecorder = true;
 	}
+	else if (StrEqual(name, "eventqueuefix"))
+	{
+		gB_Eventqueuefix = true;
+	}
 }
 
 public void OnLibraryRemoved(const char[] name)
@@ -392,6 +488,10 @@ public void OnLibraryRemoved(const char[] name)
 	else if (StrEqual(name, "shavit-replay-recorder"))
 	{
 		gB_ReplayRecorder = false;
+	}
+	else if (StrEqual(name, "eventqueuefix"))
+	{
+		gB_Eventqueuefix = false;
 	}
 }
 
@@ -911,6 +1011,16 @@ public void OnMapEnd()
 	gB_InsertedPrebuiltZones = false;
 	delete gH_DrawVisible;
 	delete gH_DrawAllZones;
+}
+
+public void OnClientPutInServer(int client)
+{
+	gI_LatestTeleportTick[client] = 0;
+	
+	if (!IsFakeClient(client) && gH_TeleportDhook != null)
+	{
+		gH_TeleportDhook.HookEntity(Hook_Pre, client, DHooks_OnTeleport);
+	}
 }
 
 public void OnEntityCreated(int entity, const char[] classname)
@@ -3909,6 +4019,40 @@ public void Shavit_OnDatabaseLoaded()
 	}
 }
 
+void ResetClientTargetNameAndClassName(int client, int track)
+{
+	char targetname[64];
+	char classname[64];
+
+	if (track == Track_Main)
+	{
+		gCV_ResetTargetnameMain.GetString(targetname, sizeof(targetname));
+		gCV_ResetClassnameMain.GetString(classname, sizeof(classname));
+	}
+	else
+	{
+		gCV_ResetTargetnameBonus.GetString(targetname, sizeof(targetname));
+		gCV_ResetClassnameBonus.GetString(classname, sizeof(classname));
+	}
+
+	DispatchKeyValue(client, "targetname", targetname);
+
+	if (!classname[0])
+	{
+		classname = "player";
+	}
+
+	SetEntPropString(client, Prop_Data, "m_iClassname", classname);
+}
+
+public Action Shavit_OnStart(int client, int track)
+{
+	if(gCV_ForceTargetnameReset.BoolValue)
+	{
+		ResetClientTargetNameAndClassName(client, track);
+	}
+}
+
 public void Shavit_OnRestart(int client, int track)
 {
 	gI_LastStage[client] = 0;
@@ -3955,6 +4099,7 @@ public void Shavit_OnRestart(int client, int track)
 
 			if (!gB_HasSetStart[client][track] || gB_StartAnglesOnly[client][track])
 			{
+				ResetClientTargetNameAndClassName(client, track);
 				// normally StartTimer will happen on zone-touch BUT we have this here for zones that are in the air
 				Shavit_StartTimer(client, track);
 			}
@@ -4192,6 +4337,26 @@ public void CreateZoneEntities(bool only_create_dead_entities)
 	gB_ZoneCreationQueued = false;
 }
 
+public MRESReturn DHooks_OnTeleport(int pThis, DHookParam hParams)
+{
+	if (!IsValidEntity(pThis) || !IsClientInGame(pThis))
+	{
+		return MRES_Ignored;
+	}
+	
+	if (!hParams.IsNull(1))
+	{
+		gI_LatestTeleportTick[pThis] = GetGameTickCount();
+	}
+	
+	return MRES_Ignored;
+}
+
+void PhysicsRemoveTouchedList(int client)
+{
+	SDKCall(gH_PhysicsRemoveTouchedList, client);
+}
+
 public void StartTouchPost(int entity, int other)
 {
 	if(other < 1 || other > MaxClients || gI_EntityZone[entity] == -1 || !gA_ZoneCache[gI_EntityZone[entity]].bZoneInitialized || IsFakeClient(other) ||
@@ -4324,6 +4489,38 @@ public void TouchPost(int entity, int other)
 	{
 		case Zone_Start:
 		{
+			if (gB_Eventqueuefix)
+			{
+				static int tick_served[MAXPLAYERS + 1];
+				int curr_tick = GetGameTickCount();
+				
+				// GAMMACASE: This prevents further abuses related to external events being ran after you teleport from the trigger, with events setup, outside the start zone into the start zone.
+				// This accounts for the io events that might be set inside the start zone trigger in OnStartTouch and wont reset them!
+				// Logic behind this code is that all events in this chain are not instantly fired, so checking if there were teleport from the outside of a start zone in last couple of ticks
+				// and doing PhysicsRemoveTouchedList() now to trigger all OnEndTouch that should happen at the same tick but later and removing them allows further events from OnStartTouch be separated
+				// and be fired after which is the expected and desired effect.
+				// This also kills all ongoing events that were active on the client prior to the teleportation to start and also resets targetname and classname
+				// before the OnStartTouch from triggers in start zone are run, thus preventing the maps to be abusable if they don't have any reset triggers in place
+				if (gI_LatestTeleportTick[other] <= curr_tick <= gI_LatestTeleportTick[other] + 4)
+				{
+					if (curr_tick != tick_served[other])
+					{
+						ResetClientTargetNameAndClassName(other, gA_ZoneCache[gI_EntityZone[entity]].iZoneTrack);
+
+						PhysicsRemoveTouchedList(other);
+						ClearClientEvents(other);
+
+						tick_served[other] = curr_tick;
+					}
+
+					return;
+				}
+				else if (curr_tick != tick_served[other])
+				{
+					tick_served[other] = 0;
+				}
+			}
+			
 			if (GetEntPropEnt(other, Prop_Send, "m_hGroundEntity") == -1 && !Shavit_GetStyleSettingBool(Shavit_GetBhopStyle(other), "startinair"))
 			{
 				return;
