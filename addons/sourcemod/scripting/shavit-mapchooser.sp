@@ -226,6 +226,8 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_rtv", Command_RockTheVote, "Lets players Rock The Vote");
 	RegConsoleCmd("sm_unrtv", Command_UnRockTheVote, "Lets players un-Rock The Vote");
 	RegConsoleCmd("sm_nomlist", Command_NomList, "Shows currently nominated maps");
+	RegConsoleCmd("sm_nominatedmaps", Command_NomList, "Shows currently nominated maps");
+	RegConsoleCmd("sm_nominations", Command_NomList, "Shows currently nominated maps");
 
 	RegAdminCmd("sm_smcdebug", Command_Debug, ADMFLAG_RCON);
 
@@ -627,7 +629,7 @@ void InitiateMapVote(MapChange when)
 	char map[PLATFORM_MAX_PATH];
 	char mapdisplay[PLATFORM_MAX_PATH + 32];
 
-	StringMap tiersMap = gB_Rankings ? Shavit_GetMapTiers() : new StringMap();
+	StringMap tiersMap = gB_Rankings ? Shavit_GetMapTiers() : null;
 
 	int nominateMapsToAdd = (mapsToAdd > g_aNominateList.Length) ? g_aNominateList.Length : mapsToAdd;
 	for(int i = 0; i < nominateMapsToAdd; i++)
@@ -635,7 +637,7 @@ void InitiateMapVote(MapChange when)
 		g_aNominateList.GetString(i, map, sizeof(map));
 		GetMapDisplayName(map, mapdisplay, sizeof(mapdisplay));
 
-		if(g_cvMapVoteShowTier.BoolValue)
+		if (tiersMap && g_cvMapVoteShowTier.BoolValue)
 		{
 			int tier = 0;
 			tiersMap.GetValue(mapdisplay, tier);
@@ -684,14 +686,14 @@ void InitiateMapVote(MapChange when)
 		g_aMapList.GetString(rand, map, sizeof(map));
 		LessStupidGetMapDisplayName(map, mapdisplay, sizeof(mapdisplay));
 
-		if (StrEqual(map, g_cMapName) || g_aOldMaps.FindString(map) != -1)
+		if (StrEqual(map, g_cMapName) || g_aOldMaps.FindString(map) != -1 || g_aNominateList.FindString(map) != -1)
 		{
 			// don't add current map or recently played
 			i--;
 			continue;
 		}
 
-		if(g_cvMapVoteShowTier.BoolValue)
+		if (tiersMap && g_cvMapVoteShowTier.BoolValue)
 		{
 			int tier = 0;
 			tiersMap.GetValue(mapdisplay, tier);
@@ -1194,7 +1196,9 @@ void SMC_NominateMatches(int client, const char[] mapname)
 	bool isOldMap = false;
 	char map[PLATFORM_MAX_PATH];
 	char oldMapName[PLATFORM_MAX_PATH];
-	StringMap tiersMap = gB_Rankings ? Shavit_GetMapTiers() : new StringMap();
+	StringMap tiersMap = gB_Rankings ? Shavit_GetMapTiers() : null;
+	int min = GetConVarInt(g_cvMinTier);
+	int max = GetConVarInt(g_cvMaxTier);
 
 	int length = g_aMapList.Length;
 	for(int i = 0; i < length; i++)
@@ -1222,13 +1226,20 @@ void SMC_NominateMatches(int client, const char[] mapname)
 			char mapdisplay[PLATFORM_MAX_PATH];
 			LessStupidGetMapDisplayName(entry, mapdisplay, sizeof(mapdisplay));
 
-			int tier = 0;
-			tiersMap.GetValue(mapdisplay, tier);
+			if (tiersMap)
+			{
+				int tier = 0;
+				tiersMap.GetValue(mapdisplay, tier);
 
-			char mapdisplay2[PLATFORM_MAX_PATH];
-			FormatEx(mapdisplay2, sizeof(mapdisplay2), "%s | T%i", mapdisplay, tier);
+				if (!(min <= tier <= max))
+				{
+					continue;
+				}
 
-			subNominateMenu.AddItem(entry, mapdisplay2);
+				Format(mapdisplay, sizeof(mapdisplay), "%s | T%i", mapdisplay, tier);
+			}
+
+			subNominateMenu.AddItem(entry, mapdisplay);
 		}
 	}
 
@@ -1473,7 +1484,7 @@ void CreateNominateMenu()
 	g_hNominateMenu = new Menu(NominateMenuHandler);
 
 	g_hNominateMenu.SetTitle("Nominate");
-	StringMap tiersMap = gB_Rankings ? Shavit_GetMapTiers() : new StringMap();
+	StringMap tiersMap = gB_Rankings ? Shavit_GetMapTiers() : null;
 
 	g_aMapList.SortCustom(SlowSortThatSkipsFolders);
 
@@ -1498,7 +1509,7 @@ void CreateNominateMenu()
 		char mapdisplay[PLATFORM_MAX_PATH];
 		LessStupidGetMapDisplayName(mapname, mapdisplay, sizeof(mapdisplay));
 
-		if (gB_Rankings)
+		if (tiersMap)
 		{
 			int tier = 0;
 			tiersMap.GetValue(mapdisplay, tier);
@@ -1555,7 +1566,7 @@ void CreateTierMenus()
 	int max = GetConVarInt(g_cvMaxTier);
 
 	InitTierMenus(min,max);
-	StringMap tiersMap = gB_Rankings ? Shavit_GetMapTiers() : new StringMap();
+	StringMap tiersMap = gB_Rankings ? Shavit_GetMapTiers() : null;
 
 	int length = g_aMapList.Length;
 	for(int i = 0; i < length; ++i)
@@ -1568,7 +1579,11 @@ void CreateTierMenus()
 		LessStupidGetMapDisplayName(mapname, mapdisplay, sizeof(mapdisplay));
 
 		int mapTier = 0;
-		tiersMap.GetValue(mapdisplay, mapTier);
+
+		if (tiersMap)
+		{
+			tiersMap.GetValue(mapdisplay, mapTier);
+		}
 
 		if(StrEqual(mapname, g_cMapName))
 		{
@@ -1581,12 +1596,11 @@ void CreateTierMenus()
 			style = ITEMDRAW_DISABLED;
 		}
 
-		char mapdisplay2[PLATFORM_MAX_PATH];
-		FormatEx(mapdisplay2, sizeof(mapdisplay2), "%s | T%i", mapdisplay, mapTier);
+		Format(mapdisplay, sizeof(mapdisplay), "%s | T%i", mapdisplay, mapTier);
 
 		if (min <= mapTier <= max)
 		{
-			AddMenuItem(g_aTierMenus[mapTier], mapname, mapdisplay2, style);
+			AddMenuItem(g_aTierMenus[mapTier], mapname, mapdisplay, style);
 		}
 	}
 
@@ -1998,7 +2012,7 @@ public Action BaseCommands_Command_Map_Menu(int client, int args)
 	char map[PLATFORM_MAX_PATH];
 	Menu menu = new Menu(MapsMenuHandler);
 
-	StringMap tiersMap = gB_Rankings ? Shavit_GetMapTiers() : new StringMap();
+	StringMap tiersMap = gB_Rankings ? Shavit_GetMapTiers() : null;
 	ArrayList maps;
 
 	if (args < 1)
@@ -2030,13 +2044,14 @@ public Action BaseCommands_Command_Map_Menu(int client, int args)
 			char mapdisplay[PLATFORM_MAX_PATH];
 			LessStupidGetMapDisplayName(entry, mapdisplay, sizeof(mapdisplay));
 
-			int tier = 0;
-			tiersMap.GetValue(mapdisplay, tier);
+			if (tiersMap)
+			{
+				int tier = 0;
+				tiersMap.GetValue(mapdisplay, tier);
+				Format(mapdisplay, sizeof(mapdisplay), "%s | T%i", mapdisplay, tier);
+			}
 
-			char mapdisplay2[PLATFORM_MAX_PATH];
-			FormatEx(mapdisplay2, sizeof(mapdisplay2), "%s | T%i", mapdisplay, tier);
-
-			menu.AddItem(entry, mapdisplay2);
+			menu.AddItem(entry, mapdisplay);
 		}
 	}
 
