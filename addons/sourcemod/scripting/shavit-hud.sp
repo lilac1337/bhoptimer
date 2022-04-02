@@ -1317,7 +1317,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 		if((gI_HUD2Settings[client] & HUD2_TIME) == 0)
 		{
 			char sTime[32];
-			FormatSeconds(data.fTime, sTime, 32, false);
+			FormatSecondsHud(data.fTime, sTime, 32, true);
 
 			char sTimeDiff[32];
 

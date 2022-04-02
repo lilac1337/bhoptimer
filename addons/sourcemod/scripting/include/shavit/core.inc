@@ -358,7 +358,54 @@ stock void FormatSeconds(float time, char[] newtime, int newtimesize, bool preci
 	}
 	else
 	{
-		FormatEx(sSeconds, 8, precise? "%.3f":"%.1f", fSeconds);
+		FormatEx(sSeconds, 8, precise? "%.4f":"%.1f", fSeconds);
+	}
+
+	if (!full_hms && fTempTime < 60.0)
+	{
+		strcopy(newtime, newtimesize, sSeconds);
+		FormatEx(newtime, newtimesize, "%s%s", (time < 0.0) ? "-":"", sSeconds);
+	}
+	else
+	{
+		int iMinutes = (iRounded / 60);
+
+		if (!full_hms && fTempTime < 3600.0)
+		{
+			FormatEx(newtime, newtimesize, "%s%d:%s%s", (time < 0.0)? "-":"", iMinutes, (fSeconds < 10)? "0":"", sSeconds);
+		}
+		else
+		{
+			int iHours = (iMinutes / 60);
+			iMinutes %= 60;
+
+			FormatEx(newtime, newtimesize, "%s%d:%s%d:%s%s", (time < 0.0)? "-":"", iHours, (iMinutes < 10)? "0":"", iMinutes, (fSeconds < 10)? "0":"", sSeconds);
+		}
+	}
+}
+
+stock void FormatSecondsHud(float time, char[] newtime, int newtimesize, bool precise = true, bool nodecimal = false, bool full_hms = false)
+{
+	float fTempTime = time;
+
+	if(fTempTime < 0.0)
+	{
+		fTempTime = -fTempTime;
+	}
+
+	int iRounded = RoundToFloor(fTempTime);
+	int iSeconds = (iRounded % 60);
+	float fSeconds = iSeconds + fTempTime - iRounded;
+
+	char sSeconds[8];
+
+	if (nodecimal)
+	{
+		FormatEx(sSeconds, 8, "%d", iSeconds);
+	}
+	else
+	{
+		FormatEx(sSeconds, 8, precise? "%.2f":"%.1f", fSeconds);
 	}
 
 	if (!full_hms && fTempTime < 60.0)
