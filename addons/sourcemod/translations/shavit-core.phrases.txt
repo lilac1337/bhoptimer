@@ -52,7 +52,7 @@
 	}
 	"StyleUnranked"
 	{
-		"en"		"[Unranked]"
+		"en"		"｢Unranked｣"
 	}
 	// ---------- Misc ---------- //
 	"LeftRightCheat"

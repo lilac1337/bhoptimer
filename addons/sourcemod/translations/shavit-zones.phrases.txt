@@ -212,7 +212,7 @@
 	"ZoneForceRender"
 	{
 		"#format"	"{1:s}"
-		"en"		"[{1}] Force zone drawing"
+		"en"		"｢{1}｣ Force zone drawing"
 	}
 	"ZoneSetAiraccelerate"
 	{
