@@ -1311,11 +1311,11 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 		}
 
 
-		if(data.iZoneHUD == ZoneHUD_Start && !Shavit_GetPoints(client) == 0.0)
+		if(data.iZoneHUD == ZoneHUD_Start && !(Shavit_GetPoints(client) == 0.0))
 		{
 			FormatEx(sLine, 128, "%T ", "HudInStartZoneimretardedandafaggot", client, Shavit_GetRank(client), Shavit_GetRankedPlayers(), data.iSpeed);
 		}
-		else if(!Shavit_GetPoints(client) == 0.0) 
+		else if(!(Shavit_GetPoints(client) == 0.0)) 
 		{
 			FormatEx(sLine, 128, "%T ", "HudInEndZoneimretardedandafaggot", client, Shavit_GetRank(client), Shavit_GetRankedPlayers(), data.iSpeed);
 		}
@@ -1355,7 +1355,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 		if((gI_HUD2Settings[client] & HUD2_TIME) == 0)
 		{
 			char sTime[32];
-			FormatSeconds(data.fTime, sTime, 32, false);
+			FormatSecondsHud(data.fTime, sTime, 32, true);
 
 			char sTimeDiff[32];
 
