@@ -216,7 +216,6 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("Shavit_GetMaxVelocity", Native_GetMaxVelocity);
 	CreateNative("Shavit_SetAvgVelocity", Native_SetAvgVelocity);
 	CreateNative("Shavit_SetMaxVelocity", Native_SetMaxVelocity);
-	CreateNative("Shavit_Core_CookiesRetrieved", Native_Core_CookiesRetrieved);
 	CreateNative("Shavit_ShouldProcessFrame", Native_ShouldProcessFrame);
 	CreateNative("Shavit_GotoEnd", Native_GotoEnd);
 	CreateNative("Shavit_UpdateLaggedMovement", Native_UpdateLaggedMovement);
@@ -1063,9 +1062,9 @@ public Action Command_WipePlayer(int client, int args)
 	{
 		gI_WipePlayerID[client] = SteamIDToAccountID(sArgString);
 
-		if(gI_WipePlayerID[client] <= 0)
+		if(gI_WipePlayerID[client] == 0)
 		{
-			Shavit_PrintToChat(client, "Entered SteamID (%s) is invalid. The range for valid SteamIDs is [U:1:1] to [U:1:2147483647].", sArgString);
+			Shavit_PrintToChat(client, "Entered SteamID (%s) is invalid. The range for valid SteamIDs is [U:1:1] to [U:1:4294967295].", sArgString);
 
 			return Plugin_Handled;
 		}
@@ -1078,12 +1077,12 @@ public Action Command_WipePlayer(int client, int args)
 			gS_Verification[client][i] = sAlphabet[GetRandomInt(0, sizeof(sAlphabet) - 1)];
 		}
 
-		Shavit_PrintToChat(client, "Preparing to delete all user data for SteamID %s[U:1:%d]%s. To confirm, enter %s!wipeplayer %s",
+		Shavit_PrintToChat(client, "Preparing to delete all user data for SteamID %s[U:1:%u]%s. To confirm, enter %s!wipeplayer %s",
 			gS_ChatStrings.sVariable, gI_WipePlayerID[client], gS_ChatStrings.sText, gS_ChatStrings.sVariable2, gS_Verification[client]);
 	}
 	else
 	{
-		Shavit_PrintToChat(client, "Deleting data for SteamID %s[U:1:%d]%s...",
+		Shavit_PrintToChat(client, "Deleting data for SteamID %s[U:1:%u]%s...",
 			gS_ChatStrings.sVariable, gI_WipePlayerID[client], gS_ChatStrings.sText);
 
 		DeleteUserData(client, gI_WipePlayerID[client]);
@@ -1110,8 +1109,8 @@ public void Trans_DeleteRestOfUserSuccess(Database db, DataPack hPack, int numQu
 
 	Shavit_ReloadLeaderboards();
 
-	Shavit_LogMessage("%L - wiped user data for [U:1:%d].", client, iSteamID);
-	Shavit_PrintToChat(client, "Finished wiping timer data for user %s[U:1:%d]%s.", gS_ChatStrings.sVariable, iSteamID, gS_ChatStrings.sText);
+	Shavit_LogMessage("%L - wiped user data for [U:1:%u].", client, iSteamID);
+	Shavit_PrintToChat(client, "Finished wiping timer data for user %s[U:1:%u]%s.", gS_ChatStrings.sVariable, iSteamID, gS_ChatStrings.sText);
 }
 
 public void Trans_DeleteRestOfUserFailed(Database db, DataPack hPack, int numQueries, const char[] error, int failIndex, any[] queryData)
@@ -1120,7 +1119,7 @@ public void Trans_DeleteRestOfUserFailed(Database db, DataPack hPack, int numQue
 	hPack.ReadCell();
 	int iSteamID = hPack.ReadCell();
 	delete hPack;
-	LogError("Timer error! Failed to wipe user data (wipe | delete user data/times, id [U:1:%d]). Reason: %s", iSteamID, error);
+	LogError("Timer error! Failed to wipe user data (wipe | delete user data/times, id [U:1:%u]). Reason: %s", iSteamID, error);
 }
 
 void DeleteRestOfUser(int iSteamID, DataPack hPack)
@@ -1512,7 +1511,7 @@ void DoJump(int client)
 	}
 
 	// TF2 doesn't use stamina
-	if (gEV_Type != Engine_TF2 && (GetStyleSettingBool(gA_Timers[client].bsStyle, "easybhop")) || Shavit_InsideZone(client, Zone_Easybhop, gA_Timers[client].iTimerTrack))
+	if (gEV_Type != Engine_TF2 && (GetStyleSettingBool(gA_Timers[client].bsStyle, "easybhop")) || (gB_Zones && Shavit_InsideZone(client, Zone_Easybhop, gA_Timers[client].iTimerTrack)))
 	{
 		SetEntPropFloat(client, Prop_Send, "m_flStamina", 0.0);
 	}
@@ -1692,14 +1691,17 @@ public int Native_CanPause(Handle handler, int numParams)
 		iFlags |= CPR_NoTimer;
 	}
 
-	if (Shavit_InsideZone(client, Zone_Start, gA_Timers[client].iTimerTrack))
+	if (gB_Zones)
 	{
-		iFlags |= CPR_InStartZone;
-	}
+		if (Shavit_InsideZone(client, Zone_Start, gA_Timers[client].iTimerTrack))
+		{
+			iFlags |= CPR_InStartZone;
+		}
 
-	if (Shavit_InsideZone(client, Zone_End, gA_Timers[client].iTimerTrack))
-	{
-		iFlags |= CPR_InEndZone;
+		if (Shavit_InsideZone(client, Zone_End, gA_Timers[client].iTimerTrack))
+		{
+			iFlags |= CPR_InEndZone;
+		}
 	}
 
 	if(GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1 && GetEntityMoveType(client) != MOVETYPE_LADDER)
@@ -2172,7 +2174,9 @@ public int Native_LoadSnapshot(Handle handler, int numParams)
 	GetNativeArray(2, snapshot, sizeof(timer_snapshot_t));
 	snapshot.fTimescale = (snapshot.fTimescale > 0.0) ? snapshot.fTimescale : 1.0;
 
-	if (!Shavit_HasStyleAccess(client, snapshot.bsStyle))
+	bool force = GetNativeCell(4);
+
+	if (!Shavit_HasStyleAccess(client, snapshot.bsStyle) && !force)
 	{
 		return 0;
 	}
@@ -2271,11 +2275,6 @@ public any Native_SetMaxVelocity(Handle plugin, int numParams)
 {
 	gA_Timers[GetNativeCell(1)].fMaxVelocity = GetNativeCell(2);
 	return 1;
-}
-
-public any Native_Core_CookiesRetrieved(Handle plugin, int numParams)
-{
-	return gB_CookiesRetrieved[GetNativeCell(1)];
 }
 
 public any Native_ShouldProcessFrame(Handle plugin, int numParams)
@@ -3086,7 +3085,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	}
 
 	int iGroundEntity = GetEntPropEnt(client, Prop_Send, "m_hGroundEntity");
-	bool bInStart = Shavit_InsideZone(client, Zone_Start, gA_Timers[client].iTimerTrack);
+	bool bInStart = gB_Zones && Shavit_InsideZone(client, Zone_Start, gA_Timers[client].iTimerTrack);
 
 	if (gA_Timers[client].bTimerEnabled && !gA_Timers[client].bClientPaused)
 	{
@@ -3152,7 +3151,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	}
 
 	// key blocking
-	if(!gA_Timers[client].bCanUseAllKeys && mtMoveType != MOVETYPE_NOCLIP && mtMoveType != MOVETYPE_LADDER && !Shavit_InsideZone(client, Zone_Freestyle, -1))
+	if(!gA_Timers[client].bCanUseAllKeys && mtMoveType != MOVETYPE_NOCLIP && mtMoveType != MOVETYPE_LADDER && !(gB_Zones && Shavit_InsideZone(client, Zone_Freestyle, -1)))
 	{
 		// block E
 		if (GetStyleSettingBool(gA_Timers[client].bsStyle, "block_use") && (buttons & IN_USE) > 0)

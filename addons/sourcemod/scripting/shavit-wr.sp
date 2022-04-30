@@ -681,7 +681,7 @@ public int Native_GetWRName(Handle handler, int numParams)
 		}
 		else
 		{
-			FormatEx(sName, sizeof(sName), "[U:1:%d]", iSteamID);
+			FormatEx(sName, sizeof(sName), "[U:1:%u]", iSteamID);
 			SetNativeString(2, sName, GetNativeCell(3));
 			return 0;
 		}
@@ -1531,7 +1531,7 @@ public void DeleteConfirm_Callback(Database db, DBResultSet results, const char[
 	FormatTime(sDate, 32, "%Y-%m-%d %H:%M:%S", iTimestamp);
 
 	// above the client == 0 so log doesn't get lost if admin disconnects between deleting record and query execution
-	Shavit_LogMessage("Admin [U:1:%d] - deleted record. Runner: %s ([U:1:%d]) | Map: %s | Style: %s | Track: %s | Time: %.2f (%s) | Strafes: %d (%.1f%%) | Jumps: %d (%.1f%%) | Run date: %s | Record ID: %d",
+	Shavit_LogMessage("Admin [U:1:%u] - deleted record. Runner: %s ([U:1:%u]) | Map: %s | Style: %s | Track: %s | Time: %.2f (%s) | Strafes: %d (%.1f%%) | Jumps: %d (%.1f%%) | Run date: %s | Record ID: %d",
 		admin_steamid, sName, iSteamID, sMap, gS_StyleStrings[iStyle].sStyleName, sTrack, fTime, (bWRDeleted)? "WR":"not WR", iStrafes, fSync, iJumps, fPerfectJumps, sDate, iRecordID);
 
 	for (int i = 1; i <= MaxClients; i++)
@@ -2376,7 +2376,7 @@ public void SQL_SubMenu_Callback(Database db, DBResultSet results, const char[] 
 
 		char sDisplay[128];
 		FormatEx(sDisplay, 128, "%T: %s", "WRTime", client, sTime);
-		hMenu.AddItem("-1", sDisplay);
+		hMenu.AddItem("-1", sDisplay, ITEMDRAW_DISABLED);
 
 		int iStyle = results.FetchInt(3);
 		int iJumps = results.FetchInt(2);
@@ -2391,13 +2391,13 @@ public void SQL_SubMenu_Callback(Database db, DBResultSet results, const char[] 
 			FormatEx(sDisplay, 128, "%T: %d (%.2f%%)", "WRJumps", client, iJumps, fPerfs);
 		}
 
-		hMenu.AddItem("-1", sDisplay);
+		hMenu.AddItem("-1", sDisplay, ITEMDRAW_DISABLED);
 
 		FormatEx(sDisplay, 128, "%T: %d", "WRCompletions", client, results.FetchInt(12));
-		hMenu.AddItem("-1", sDisplay);
+		hMenu.AddItem("-1", sDisplay, ITEMDRAW_DISABLED);
 
 		FormatEx(sDisplay, 128, "%T: %s", "WRStyle", client, gS_StyleStrings[iStyle].sStyleName);
-		hMenu.AddItem("-1", sDisplay);
+		hMenu.AddItem("-1", sDisplay, ITEMDRAW_DISABLED);
 
 		results.FetchString(6, sMap, sizeof(sMap));
 
@@ -2406,7 +2406,7 @@ public void SQL_SubMenu_Callback(Database db, DBResultSet results, const char[] 
 		if(gB_Rankings && fPoints > 0.0)
 		{
 			FormatEx(sDisplay, 128, "%T: %.03f", "WRPointsCap", client, fPoints);
-			hMenu.AddItem("-1", sDisplay);
+			hMenu.AddItem("-1", sDisplay, ITEMDRAW_DISABLED);
 		}
 
 		iSteamID = results.FetchInt(4);
@@ -2420,7 +2420,7 @@ public void SQL_SubMenu_Callback(Database db, DBResultSet results, const char[] 
 		}
 
 		FormatEx(sDisplay, 128, "%T: %s", "WRDate", client, sDate);
-		hMenu.AddItem("-1", sDisplay);
+		hMenu.AddItem("-1", sDisplay, ITEMDRAW_DISABLED);
 
 		int strafes = results.FetchInt(7);
 		float sync = results.FetchFloat(8);
@@ -2428,7 +2428,7 @@ public void SQL_SubMenu_Callback(Database db, DBResultSet results, const char[] 
 		if(iJumps > 0 || strafes > 0)
 		{
 			FormatEx(sDisplay, 128, (sync != -1.0)? "%T: %d (%.02f%%)":"%T: %d", "WRStrafes", client, strafes, sync);
-			hMenu.AddItem("-1", sDisplay);
+			hMenu.AddItem("-1", sDisplay, ITEMDRAW_DISABLED);
 		}
 
 		char sMenuItem[64];
@@ -2460,7 +2460,7 @@ public void SQL_SubMenu_Callback(Database db, DBResultSet results, const char[] 
 
 	if(strlen(sName) > 0)
 	{
-		FormatEx(sFormattedTitle, 256, "%s [U:1:%d]\n--- %s: [%s]", sName, iSteamID, sMap, sTrack);
+		FormatEx(sFormattedTitle, 256, "%s [U:1:%u]\n--- %s: [%s]", sName, iSteamID, sMap, sTrack);
 	}
 	else
 	{

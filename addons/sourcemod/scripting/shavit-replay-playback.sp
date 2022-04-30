@@ -157,6 +157,7 @@ float gF_LastInteraction[MAXPLAYERS+1];
 
 float gF_TimeDifference[MAXPLAYERS+1];
 int   gI_TimeDifferenceStyle[MAXPLAYERS+1];
+float gF_TimeDifferenceLength[MAXPLAYERS+1]; // i love adding variables...
 float gF_VelocityDifference2D[MAXPLAYERS+1];
 float gF_VelocityDifference3D[MAXPLAYERS+1];
 
@@ -817,7 +818,7 @@ bool LoadReplay(frame_cache_t cache, int style, int track, const char[] path, co
 {
 	bool ret = LoadReplayCache(cache, style, track, path, mapname);
 
-	if (ret && cache.iSteamID > 0)
+	if (ret && cache.iSteamID != 0)
 	{
 		char sQuery[192];
 		FormatEx(sQuery, 192, "SELECT name FROM %susers WHERE auth = %d;", gS_MySQLPrefix, cache.iSteamID);
@@ -1124,12 +1125,27 @@ public int Native_StartReplayFromFile(Handle handler, int numParams)
 
 	frame_cache_t cache; // null cache
 
-	if (!LoadReplay(cache, style, track, path, gS_Map))
+	if (!LoadReplayCache(cache, style, track, path, gS_Map))
 	{
 		return 0;
 	}
 
-	return CreateReplayEntity(track, style, delay, client, bot, type, ignorelimit, cache, 0);
+	bot = CreateReplayEntity(track, style, delay, client, bot, type, ignorelimit, cache, 0);
+
+	if (!bot)
+	{
+		delete cache.aFrames;
+		return 0;
+	}
+
+	if (cache.iSteamID != 0)
+	{
+		char sQuery[192];
+		FormatEx(sQuery, sizeof(sQuery), "SELECT name FROM %susers WHERE auth = %d;", gS_MySQLPrefix, cache.iSteamID);
+		gH_SQL.Query2(SQL_GetUserName_Botref_Callback, sQuery, EntIndexToEntRef(bot), DBPrio_High);
+	}
+
+	return bot;
 }
 
 public int Native_ReloadReplay(Handle handler, int numParams)
@@ -1354,6 +1370,12 @@ public int Native_GetClosestReplayTime(Handle plugin, int numParams)
 	}
 
 	int client = GetNativeCell(1);
+
+	if (numParams > 1)
+	{
+		SetNativeCellRef(2, gF_TimeDifferenceLength[client]);
+	}
+
 	return view_as<int>(gF_TimeDifference[client]);
 }
 
@@ -1900,6 +1922,24 @@ bool DeleteReplay(int style, int track, int accountid, const char[] mapname)
 	}
 
 	return true;
+}
+
+public void SQL_GetUserName_Botref_Callback(Database db, DBResultSet results, const char[] error, int botref)
+{
+	if (results == null)
+	{
+		LogError("SQL error! Failed to get username for replay bot! Reason: %s", error);
+		return;
+	}
+
+	int bot = EntRefToEntIndex(botref);
+
+	if (IsValidEntity(bot) && results.FetchRow())
+	{
+		char name[32+1];
+		results.FetchString(0, name, sizeof(name));
+		Shavit_SetReplayCacheName(bot, name);
+	}
 }
 
 public void SQL_GetUserName_Callback(Database db, DBResultSet results, const char[] error, DataPack data)
@@ -3714,6 +3754,8 @@ float GetClosestReplayTime(int client)
 		return -1.0;
 	}
 
+	gF_TimeDifferenceLength[client] = GetReplayLength(style, track, gA_FrameCache[style][track]);
+
 	// inside start zone
 	if(iClosestFrame < iPreFrames)
 	{
@@ -3722,7 +3764,7 @@ float GetClosestReplayTime(int client)
 		return 0.0;
 	}
 
-	float frametime = GetReplayLength(style, track, gA_FrameCache[style][track]) / float(gA_FrameCache[style][track].iFrameCount);
+	float frametime = gF_TimeDifferenceLength[client] / float(gA_FrameCache[style][track].iFrameCount);
 	float timeDifference = (iClosestFrame - iPreFrames) * frametime;
 
 	// Hides the hud if we are using the cheap search method and too far behind to be accurate
