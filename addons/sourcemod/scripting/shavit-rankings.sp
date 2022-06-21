@@ -655,7 +655,7 @@ public Action Command_SetTier(int client, int args)
 
 	int tier = StringToInt(sArg);
 
-	if(args == 0 || tier < 1 || tier > 10)
+	if(args == 0 || tier < 1 || tier > 20)
 	{
 		ReplyToCommand(client, "%T", "ArgumentsMissing", client, "sm_settier <tier> (1-10) [map]");
 

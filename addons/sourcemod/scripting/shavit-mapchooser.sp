@@ -95,7 +95,7 @@ int g_mapFileSerial = -1;
 Menu g_hNominateMenu;
 Menu g_hEnhancedMenu;
 
-Menu g_aTierMenus[10+1];
+Menu g_aTierMenus[20+1];
 bool g_bWaitingForTiers = false;
 bool g_bTiersAssigned = false;
 
@@ -204,8 +204,8 @@ public void OnPluginStart()
 
 	g_cvMapChangeSound = new Convar("smc_mapchange_sound", "0", "Play the Dr. Kleiner `3,2,1 Intializing` sound");
 
-	g_cvMinTier = new Convar("smc_min_tier", "0", "The minimum tier to show on the enhanced menu",  _, true, 0.0, true, 10.0);
-	g_cvMaxTier = new Convar("smc_max_tier", "10", "The maximum tier to show on the enhanced menu",  _, true, 0.0, true, 10.0);
+	g_cvMinTier = new Convar("smc_min_tier", "0", "The minimum tier to show on the enhanced menu",  _, true, 0.0, true, 20.0);
+	g_cvMaxTier = new Convar("smc_max_tier", "10", "The maximum tier to show on the enhanced menu",  _, true, 0.0, true, 20.0);
 
 	g_cvAntiSpam = new Convar("smc_anti_spam", "15.0", "The number of seconds a player needs to wait before rtv/unrtv/nominate/unnominate.", 0, true, 0.0, true, 300.0);
 
