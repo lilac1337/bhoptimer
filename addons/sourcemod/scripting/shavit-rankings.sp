@@ -1,8 +1,8 @@
 /*
  * shavit's Timer - Rankings
- * by: shavit
+ * by: shavit, rtldg
  *
- * This file is part of shavit's Timer.
+ * This file is part of shavit's Timer (https://github.com/shavitush/bhoptimer)
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 3.0, as published by the
@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License along with
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *
-*/
+ */
 
 // Design idea:
 // Rank 1 per map/style/track gets ((points per tier * tier) * 1.5) + (rank 1 time in seconds / 15.0) points.
@@ -69,8 +69,9 @@ enum struct ranking_t
 }
 
 char gS_MySQLPrefix[32];
-Database2 gH_SQL = null;
+Database gH_SQL = null;
 bool gB_HasSQLRANK = false; // whether the sql driver supports RANK()
+int gI_Driver = Driver_unknown;
 
 bool gB_Stats = false;
 bool gB_Late = false;
@@ -116,7 +117,7 @@ int gI_WRHoldersCvar;
 public Plugin myinfo =
 {
 	name = "[shavit] Rankings",
-	author = "shavit",
+	author = "shavit, rtldg",
 	description = "A fair and competitive ranking system for shavit's bhoptimer.",
 	version = SHAVIT_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -163,8 +164,8 @@ public void OnPluginStart()
 	RegAdminCmd("sm_recalcall", Command_RecalcAll, ADMFLAG_ROOT, "Recalculate the points for every map on the server. Run this after you change the ranking multiplier for a style or after you install the plugin.");
 
 	gCV_PointsPerTier = new Convar("shavit_rankings_pointspertier", "50.0", "Base points to use for per-tier scaling.\nRead the design idea to see how it works: https://github.com/shavitush/bhoptimer/issues/465", 0, true, 1.0);
-	gCV_WeightingMultiplier = new Convar("shavit_rankings_weighting", "0.975", "Weighing multiplier. 1.0 to disable weighting.\nFormula: p[1] * this^0 + p[2] * this^1 + p[3] * this^2 + ... + p[n] * this^(n-1)\nRestart server to apply.", 0, true, 0.01, true, 1.0);
-	gCV_WeightingLimit = new Convar("shavit_rankings_weighting_limit", "0", "Limit the number of times retreived for calculating a player's weighted points to this number.\n0 = no limit\nFor reference, a weighting of 0.975 to the power of 300 is 0.00050278777 and results in pretty much nil points for any further weighted times.\nUnused when shavit_rankings_weighting is 1.0.\nYou probably won't need to change this unless you have hundreds of thousands of player times in your database.", 0, true, 0.0, false);
+	gCV_WeightingMultiplier = new Convar("shavit_rankings_weighting", "0.975", "Weighting multiplier. 1.0 to disable weighting.\nFormula: p[0] * this^0 + p[1] * this^1 + p[2] * this^2 + ... + p[n] * this^n\nRestart server to apply.", 0, true, 0.01, true, 1.0);
+	gCV_WeightingLimit = new Convar("shavit_rankings_weighting_limit", "0", "Limit the number of times retrieved for calculating a player's weighted points to this number.\n0 = no limit\nFor reference, a weighting of 0.975 to the power of 300 is 0.00050278777 and results in pretty much nil points for any further weighted times.\nUnused when shavit_rankings_weighting is 1.0.\nYou probably won't need to change this unless you have hundreds of thousands of player times in your database.", 0, true, 0.0, false);
 	gCV_LastLoginRecalculate = new Convar("shavit_rankings_llrecalc", "0", "Maximum amount of time (in minutes) since last login to recalculate points for a player.\nsm_recalcall does not respect this setting.\n0 - disabled, don't filter anyone", 0, true, 0.0);
 	gCV_MVPRankOnes_Slow = new Convar("shavit_rankings_mvprankones_slow", "1", "Uses a slower but more featureful MVP counting system.\nEnables the WR Holder ranks & counts for every style & track.\nYou probably won't need to change this unless you have hundreds of thousands of player times in your database.", 0, true, 0.0, true, 1.0);
 	gCV_MVPRankOnes = new Convar("shavit_rankings_mvprankones", "2", "Set the players' amount of MVPs to the amount of #1 times they have.\n0 - Disabled\n1 - Enabled, for all styles.\n2 - Enabled, for default style only.\n(CS:S/CS:GO only)", 0, true, 0.0, true, 2.0);
@@ -222,9 +223,9 @@ public void OnLibraryRemoved(const char[] name)
 public void Shavit_OnDatabaseLoaded()
 {
 	GetTimerSQLPrefix(gS_MySQLPrefix, 32);
-	gH_SQL = view_as<Database2>(Shavit_GetDatabase());
+	gH_SQL = Shavit_GetDatabase(gI_Driver);
 
-	if(!IsMySQLDatabase(gH_SQL))
+	if (gI_Driver != Driver_mysql)
 	{
 		SetFailState("MySQL is the only supported database engine for shavit-rankings.");
 	}
@@ -237,20 +238,21 @@ public void Shavit_OnDatabaseLoaded()
 		}
 	}
 
-	gH_SQL.Query2(SQL_Version_Callback, "SELECT VERSION();");
+	QueryLog(gH_SQL, SQL_Version_Callback,
+		gI_Driver == Driver_sqlite ? "SELECT sqlite_version();" : "SELECT VERSION();");
 
-	if (gCV_WeightingMultiplier.FloatValue == 1.0)
+	if (gI_Driver == Driver_sqlite || gCV_WeightingMultiplier.FloatValue == 1.0)
 	{
 		OnMapStart();
 		return;
 	}
 
 	char sQuery[2048];
-	Transaction2 hTrans = new Transaction2();
+	Transaction trans = new Transaction();
 
-	hTrans.AddQuery2("DROP PROCEDURE IF EXISTS UpdateAllPoints;;"); // old (and very slow) deprecated method
-	hTrans.AddQuery2("DROP FUNCTION IF EXISTS GetWeightedPoints;;"); // this is here, just in case we ever choose to modify or optimize the calculation
-	hTrans.AddQuery2("DROP FUNCTION IF EXISTS GetRecordPoints;;");
+	AddQueryLog(trans, "DROP PROCEDURE IF EXISTS UpdateAllPoints;;"); // old (and very slow) deprecated method
+	AddQueryLog(trans, "DROP FUNCTION IF EXISTS GetWeightedPoints;;"); // this is here, just in case we ever choose to modify or optimize the calculation
+	AddQueryLog(trans, "DROP FUNCTION IF EXISTS GetRecordPoints;;");
 
 	char sWeightingLimit[30];
 
@@ -297,11 +299,11 @@ public void Shavit_OnDatabaseLoaded()
 			"END;;", gS_MySQLPrefix);
 	}
 
-	hTrans.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 #else
 	if (gCV_WeightingMultiplier.FloatValue != 1.0)
 	{
-		hTrans.AddQuery2(sQuery);
+		AddQueryLog(trans, sQuery);
 	}
 #endif
 
@@ -321,10 +323,10 @@ public void Shavit_OnDatabaseLoaded()
 		"IF rtrack > 0 THEN SET ppoints = ppoints * 0.25; END IF; " ...
 		"RETURN ppoints; " ...
 		"END;;", gS_MySQLPrefix, gS_MySQLPrefix, gS_MySQLPrefix);
-	hTrans.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 #endif
 
-	gH_SQL.Execute(hTrans, Trans_RankingsSetupSuccess, Trans_RankingsSetupError, 0, DBPrio_High);
+	gH_SQL.Execute(trans, Trans_RankingsSetupSuccess, Trans_RankingsSetupError, 0, DBPrio_High);
 }
 
 public void Trans_RankingsSetupError(Database db, any data, int numQueries, const char[] error, int failIndex, any[] queryData)
@@ -392,7 +394,7 @@ public void OnMapStart()
 
 	char sQuery[512];
 	FormatEx(sQuery, sizeof(sQuery), "SELECT map, tier FROM %smaptiers ORDER BY map ASC;", gS_MySQLPrefix);
-	gH_SQL.Query2(SQL_FillTierCache_Callback, sQuery, 0, DBPrio_High);
+	QueryLog(gH_SQL, SQL_FillTierCache_Callback, sQuery, 0, DBPrio_High);
 
 	gB_TierQueried = true;
 }
@@ -435,7 +437,7 @@ public void SQL_FillTierCache_Callback(Database db, DBResultSet results, const c
 
 		char sQuery[512];
 		FormatEx(sQuery, sizeof(sQuery), "REPLACE INTO %smaptiers (map, tier) VALUES ('%s', %d);", gS_MySQLPrefix, gS_Map, gI_Tier);
-		gH_SQL.Query2(SQL_SetMapTier_Callback, sQuery, 0, DBPrio_High);
+		QueryLog(gH_SQL, SQL_SetMapTier_Callback, sQuery, 0, DBPrio_High);
 	}
 }
 
@@ -457,7 +459,7 @@ public void Shavit_OnWRDeleted(int style, int id, int track, int accountid, cons
 	char sQuery[1024];
 	// bUseCurrentMap=true because shavit-wr should maybe have updated the wr even through the updatewrcache query hasn't run yet
 	FormatRecalculate(true, track, style, sQuery, sizeof(sQuery));
-	gH_SQL.Query2(SQL_Recalculate_Callback, sQuery, (style << 8) | track, DBPrio_High);
+	QueryLog(gH_SQL, SQL_Recalculate_Callback, sQuery, (style << 8) | track, DBPrio_High);
 
 	UpdateAllPoints(true);
 }
@@ -516,7 +518,7 @@ void UpdateWRs(int client)
 		);
 	}
 
-	gH_SQL.Query2(SQL_GetWRs_Callback, sQuery, GetClientSerial(client));
+	QueryLog(gH_SQL, SQL_GetWRs_Callback, sQuery, GetClientSerial(client));
 }
 
 public void SQL_GetWRs_Callback(Database db, DBResultSet results, const char[] error, any data)
@@ -690,6 +692,7 @@ public Action Command_SetTier(int client, int args)
 	Call_Finish();
 
 	Shavit_PrintToChat(client, "%T", "SetTier", client, gS_ChatStrings.sVariable2, tier, gS_ChatStrings.sText);
+	Shavit_LogMessage("%L - set tier of `%s` to %d", client, gS_Map, tier);
 
 	char sQuery[512];
 	FormatEx(sQuery, sizeof(sQuery), "REPLACE INTO %smaptiers (map, tier) VALUES ('%s', %d);", gS_MySQLPrefix, map, tier);
@@ -698,7 +701,7 @@ public Action Command_SetTier(int client, int args)
 	data.WriteCell(client ? GetClientSerial(client) : 0);
 	data.WriteString(map);
 
-	gH_SQL.Query2(SQL_SetMapTier_Callback, sQuery, data);
+	QueryLog(gH_SQL, SQL_SetMapTier_Callback, sQuery, data);
 
 	return Plugin_Handled;
 }
@@ -780,7 +783,7 @@ void FormatRecalculate(bool bUseCurrentMap, int track, int style, char[] sQuery,
 			float fWR = Shavit_GetWorldRecord(style, track);
 
 			FormatEx(sQuery, sQueryLen,
-				"UPDATE %splayertimes PT " ...
+				"UPDATE %splayertimes AS PT " ...
 				"SET PT.points = %f * (%f / PT.time) " ...
 				"WHERE PT.style = %d AND PT.track = 0 AND PT.map = '%s';",
 				gS_MySQLPrefix,
@@ -793,7 +796,7 @@ void FormatRecalculate(bool bUseCurrentMap, int track, int style, char[] sQuery,
 		else
 		{
 			FormatEx(sQuery, sQueryLen,
-				"UPDATE %splayertimes PT " ...
+				"UPDATE %splayertimes AS PT " ...
 				"INNER JOIN %swrs WR ON " ...
 				"   PT.track = WR.track AND PT.style = WR.style AND PT.map = WR.map " ...
 				"SET " ...
@@ -821,10 +824,10 @@ void FormatRecalculate(bool bUseCurrentMap, int track, int style, char[] sQuery,
 		}
 
 		FormatEx(sQuery, sQueryLen,
-			"UPDATE %splayertimes PT " ...
-			"INNER JOIN %swrs WR ON " ...
+			"UPDATE %splayertimes AS PT " ...
+			"INNER JOIN %swrs AS WR ON " ...
 			"  PT.track %c 0 AND PT.track = WR.track AND PT.style = %d AND PT.style = WR.style %s AND PT.map = WR.map " ...
-			"INNER JOIN %smaptiers MT ON " ...
+			"INNER JOIN %smaptiers AS MT ON " ...
 			"  PT.map = MT.map " ...
 			"SET " ...
 			" PT.points = "...
@@ -849,22 +852,22 @@ public Action Command_RecalcAll(int client, int args)
 {
 	ReplyToCommand(client, "- Started recalculating points for all maps. Check console for output.");
 
-	Transaction2 trans = new Transaction2();
+	Transaction trans = new Transaction();
 	char sQuery[1024];
 
 	FormatEx(sQuery, sizeof(sQuery), "UPDATE %splayertimes SET points = 0;", gS_MySQLPrefix);
-	trans.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 	FormatEx(sQuery, sizeof(sQuery), "UPDATE %susers SET points = 0;", gS_MySQLPrefix);
-	trans.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 
 	for(int i = 0; i < gI_Styles; i++)
 	{
 		if (!Shavit_GetStyleSettingBool(i, "unranked") && Shavit_GetStyleSettingFloat(i, "rankingmultiplier") != 0.0)
 		{
 			FormatRecalculate(false, Track_Main, i, sQuery, sizeof(sQuery));
-			trans.AddQuery2(sQuery);
+			AddQueryLog(trans, sQuery);
 			FormatRecalculate(false, Track_Bonus, i, sQuery, sizeof(sQuery));
-			trans.AddQuery2(sQuery);
+			AddQueryLog(trans, sQuery);
 		}
 	}
 
@@ -894,19 +897,19 @@ public void Trans_OnRecalcFail(Database db, any data, int numQueries, const char
 
 void RecalculateSpecificMap(const char[] map, int serial)
 {
-	Transaction2 trans = new Transaction2();
+	Transaction trans = new Transaction();
 	char sQuery[1024];
 
 	// Only maintrack times because bonus times aren't tiered.
 	FormatEx(sQuery, sizeof(sQuery), "UPDATE %splayertimes SET points = 0 WHERE map = '%s' AND track = 0;", gS_MySQLPrefix, map);
-	trans.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 
 	for(int i = 0; i < gI_Styles; i++)
 	{
 		if (!Shavit_GetStyleSettingBool(i, "unranked") && Shavit_GetStyleSettingFloat(i, "rankingmultiplier") != 0.0)
 		{
 			FormatRecalculate(false, Track_Main, i, sQuery, sizeof(sQuery), map);
-			trans.AddQuery2(sQuery);
+			AddQueryLog(trans, sQuery);
 		}
 	}
 
@@ -919,20 +922,20 @@ void ReallyRecalculateCurrentMap()
 	LogError("DEBUG: 5xxx (ReallyRecalculateCurrentMap)");
 	#endif
 
-	Transaction2 trans = new Transaction2();
+	Transaction trans = new Transaction();
 	char sQuery[1024];
 
 	FormatEx(sQuery, sizeof(sQuery), "UPDATE %splayertimes SET points = 0 WHERE map = '%s';", gS_MySQLPrefix, gS_Map);
-	trans.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 
 	for (int i = 0; i < gI_Styles; i++)
 	{
 		if (!Shavit_GetStyleSettingBool(i, "unranked") && Shavit_GetStyleSettingFloat(i, "rankingmultiplier") != 0.0)
 		{
 			FormatRecalculate(true, Track_Main, i, sQuery, sizeof(sQuery));
-			trans.AddQuery2(sQuery);
+			AddQueryLog(trans, sQuery);
 			FormatRecalculate(true, Track_Bonus, i, sQuery, sizeof(sQuery));
-			trans.AddQuery2(sQuery);
+			AddQueryLog(trans, sQuery);
 		}
 	}
 
@@ -969,7 +972,7 @@ public void Shavit_OnFinish_Post(int client, int style, float time, int jumps, i
 	char sQuery[1024];
 	FormatRecalculate(true, track, style, sQuery, sizeof(sQuery));
 
-	gH_SQL.Query2(SQL_Recalculate_Callback, sQuery, (style << 8) | track, DBPrio_High);
+	QueryLog(gH_SQL, SQL_Recalculate_Callback, sQuery, (style << 8) | track, DBPrio_High);
 	UpdateAllPoints(true, gS_Map, track);
 }
 
@@ -996,7 +999,7 @@ void UpdatePointsForSinglePlayer(int client)
 
 	char sQuery[1024];
 
-	if (gCV_WeightingMultiplier.FloatValue == 1.0)
+	if (gI_Driver == Driver_sqlite || gCV_WeightingMultiplier.FloatValue == 1.0)
 	{
 		FormatEx(sQuery, sizeof(sQuery),
 			"UPDATE %susers SET points = (SELECT SUM(points) FROM %splayertimes WHERE auth = %d) WHERE auth = %d;",
@@ -1009,7 +1012,7 @@ void UpdatePointsForSinglePlayer(int client)
 			gS_MySQLPrefix, auth);
 	}
 
-	gH_SQL.Query2(SQL_UpdateAllPoints_Callback, sQuery, GetClientSerial(client));
+	QueryLog(gH_SQL, SQL_UpdateAllPoints_Callback, sQuery, GetClientSerial(client));
 }
 
 void UpdateAllPoints(bool recalcall=false, char[] map="", int track=-1)
@@ -1026,7 +1029,7 @@ void UpdateAllPoints(bool recalcall=false, char[] map="", int track=-1)
 		FormatEx(sLastLogin, sizeof(sLastLogin), "lastlogin > %d", (GetTime() - gCV_LastLoginRecalculate.IntValue * 60));
 	}
 
-	if (gCV_WeightingMultiplier.FloatValue == 1.0)
+	if (gI_Driver == Driver_sqlite || gCV_WeightingMultiplier.FloatValue == 1.0)
 	{
 		FormatEx(sQuery, sizeof(sQuery),
 			"UPDATE %susers AS U INNER JOIN (SELECT auth, SUM(points) as total FROM %splayertimes GROUP BY auth) P ON U.auth = P.auth SET U.points = P.total %s %s;",
@@ -1060,7 +1063,7 @@ void UpdateAllPoints(bool recalcall=false, char[] map="", int track=-1)
 			sTrackWhere);
 	}
 
-	gH_SQL.Query2(SQL_UpdateAllPoints_Callback, sQuery);
+	QueryLog(gH_SQL, SQL_UpdateAllPoints_Callback, sQuery);
 }
 
 public void SQL_UpdateAllPoints_Callback(Database db, DBResultSet results, const char[] error, any data)
@@ -1099,7 +1102,7 @@ void UpdatePlayerRank(int client, bool first)
 		hPack.WriteCell(GetClientSerial(client));
 		hPack.WriteCell(first);
 
-		gH_SQL.Query2(SQL_UpdatePlayerRank_Callback, sQuery, hPack, DBPrio_Low);
+		QueryLog(gH_SQL, SQL_UpdatePlayerRank_Callback, sQuery, hPack, DBPrio_Low);
 	}
 }
 
@@ -1146,10 +1149,10 @@ void UpdateTop100()
 	FormatEx(sQuery, sizeof(sQuery),
 		"SELECT * FROM (SELECT COUNT(*) as c, 0 as auth, '' as name, '' as p FROM %susers WHERE points > 0) a \
 		UNION ALL \
-		SELECT * FROM (SELECT -1 as c, auth, name, points FROM %susers WHERE points > 0 ORDER BY points DESC LIMIT 100) b;",
+		SELECT * FROM (SELECT -1 as c, auth, name, FORMAT(points, 2) FROM %susers WHERE points > 0 ORDER BY points DESC LIMIT 100) b;",
 		gS_MySQLPrefix, gS_MySQLPrefix);
 
-	gH_SQL.Query2(SQL_UpdateTop100_Callback, sQuery, 0, DBPrio_High);
+	QueryLog(gH_SQL, SQL_UpdateTop100_Callback, sQuery, 0, DBPrio_High);
 }
 
 public void SQL_UpdateTop100_Callback(Database db, DBResultSet results, const char[] error, any data)
@@ -1182,10 +1185,11 @@ public void SQL_UpdateTop100_Callback(Database db, DBResultSet results, const ch
 		char sName[32+1];
 		results.FetchString(2, sName, sizeof(sName));
 
-		float fPoints = results.FetchFloat(3);
+		char sPoints[16];
+		results.FetchString(3, sPoints, 16);
 
 		char sDisplay[96];
-		FormatEx(sDisplay, 96, "#%d - %s (%.2f)", (++row), sName, fPoints);
+		FormatEx(sDisplay, 96, "#%d - %s (%s)", (++row), sName, sPoints);
 		gH_Top100Menu.AddItem(sSteamID, sDisplay);
 	}
 
@@ -1203,14 +1207,27 @@ bool DoWeHaveRANK(const char[] sVersion)
 {
 	float fVersion = StringToFloat(sVersion);
 
-	if (StrContains(sVersion, "MariaDB") != -1)
+	if (gI_Driver == Driver_sqlite)
 	{
-		return fVersion >= 10.2;
+		return fVersion >= 3.25;
 	}
-	else // mysql then...
+	else if (gI_Driver == Driver_pgsql)
 	{
-		return fVersion >= 8.0;
+		return fVersion >= 10.0;
 	}
+	else if (gI_Driver == Driver_mysql)
+	{
+		if (StrContains(sVersion, "MariaDB") != -1)
+		{
+			return fVersion >= 10.2;
+		}
+		else // mysql then...
+		{
+			return fVersion >= 8.0;
+		}
+	}
+
+	return false;
 }
 
 public void SQL_Version_Callback(Database db, DBResultSet results, const char[] error, any data)
@@ -1227,14 +1244,14 @@ public void SQL_Version_Callback(Database db, DBResultSet results, const char[] 
 	}
 
 	char sWRHolderRankTrackQueryYuck[] =
-		"CREATE OR REPLACE VIEW %s%s AS \
+		"%s %s%s AS \
 			SELECT \
 			0 as wrrank, \
 			style, auth, COUNT(auth) as wrcount \
 			FROM %swrs WHERE track %c 0 GROUP BY style, auth;";
 
 	char sWRHolderRankTrackQueryRANK[] =
-		"CREATE OR REPLACE VIEW %s%s AS \
+		"%s %s%s AS \
 			SELECT \
 				RANK() OVER(PARTITION BY style ORDER BY COUNT(auth) DESC, auth ASC) \
 			as wrrank, \
@@ -1242,14 +1259,14 @@ public void SQL_Version_Callback(Database db, DBResultSet results, const char[] 
 			FROM %swrs WHERE track %c 0 GROUP BY style, auth;";
 
 	char sWRHolderRankOtherQueryYuck[] =
-		"CREATE OR REPLACE VIEW %s%s AS \
+		"%s %s%s AS \
 			SELECT \
 			0 as wrrank, \
 			-1 as style, auth, COUNT(*) \
 			FROM %swrs %s %s %s %s GROUP BY auth;";
 
 	char sWRHolderRankOtherQueryRANK[] =
-		"CREATE OR REPLACE VIEW %s%s AS \
+		"%s %s%s AS \
 			SELECT \
 				RANK() OVER(ORDER BY COUNT(auth) DESC, auth ASC) \
 			as wrrank, \
@@ -1257,33 +1274,49 @@ public void SQL_Version_Callback(Database db, DBResultSet results, const char[] 
 			FROM %swrs %s %s %s %s GROUP BY auth;";
 
 	char sQuery[800];
-	Transaction2 hTransaction = new Transaction2();
+	Transaction trans = new Transaction();
+
+	if (gI_Driver == Driver_sqlite)
+	{
+		FormatEx(sQuery, sizeof(sQuery), "DROP VIEW IF EXISTS %swrhrankmain;", gS_MySQLPrefix);
+		AddQueryLog(trans, sQuery);
+		FormatEx(sQuery, sizeof(sQuery), "DROP VIEW IF EXISTS %swrhrankbonus;", gS_MySQLPrefix);
+		AddQueryLog(trans, sQuery);
+		FormatEx(sQuery, sizeof(sQuery), "DROP VIEW IF EXISTS %swrhrankall;", gS_MySQLPrefix);
+		AddQueryLog(trans, sQuery);
+		FormatEx(sQuery, sizeof(sQuery), "DROP VIEW IF EXISTS %swrhrankcvar;", gS_MySQLPrefix);
+		AddQueryLog(trans, sQuery);
+	}
 
 	FormatEx(sQuery, sizeof(sQuery),
 		!gB_HasSQLRANK ? sWRHolderRankTrackQueryYuck : sWRHolderRankTrackQueryRANK,
+		gI_Driver == Driver_sqlite ? "CREATE VIEW IF NOT EXISTS" : "CREATE OR REPLACE VIEW",
 		gS_MySQLPrefix, "wrhrankmain", gS_MySQLPrefix, '=');
-	hTransaction.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 
 	FormatEx(sQuery, sizeof(sQuery),
 		!gB_HasSQLRANK ? sWRHolderRankTrackQueryYuck : sWRHolderRankTrackQueryRANK,
+		gI_Driver == Driver_sqlite ? "CREATE VIEW IF NOT EXISTS" : "CREATE OR REPLACE VIEW",
 		gS_MySQLPrefix, "wrhrankbonus", gS_MySQLPrefix, '>');
-	hTransaction.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 
 	FormatEx(sQuery, sizeof(sQuery),
 		!gB_HasSQLRANK ? sWRHolderRankOtherQueryYuck : sWRHolderRankOtherQueryRANK,
+		gI_Driver == Driver_sqlite ? "CREATE VIEW IF NOT EXISTS" : "CREATE OR REPLACE VIEW",
 		gS_MySQLPrefix, "wrhrankall", gS_MySQLPrefix, "", "", "", "");
-	hTransaction.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 
 	FormatEx(sQuery, sizeof(sQuery),
 		!gB_HasSQLRANK ? sWRHolderRankOtherQueryYuck : sWRHolderRankOtherQueryRANK,
+		gI_Driver == Driver_sqlite ? "CREATE VIEW IF NOT EXISTS" : "CREATE OR REPLACE VIEW",
 		gS_MySQLPrefix, "wrhrankcvar", gS_MySQLPrefix,
 		(gCV_MVPRankOnes.IntValue == 2 || gCV_MVPRankOnes_Main.BoolValue) ? "WHERE" : "",
 		(gCV_MVPRankOnes.IntValue == 2)  ? "style = 0" : "",
 		(gCV_MVPRankOnes.IntValue == 2 && gCV_MVPRankOnes_Main.BoolValue) ? "AND" : "",
 		(gCV_MVPRankOnes_Main.BoolValue) ? "track = 0" : "");
-	hTransaction.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 
-	gH_SQL.Execute(hTransaction, Trans_WRHolderRankTablesSuccess, Trans_WRHolderRankTablesError, 0, DBPrio_High);
+	gH_SQL.Execute(trans, Trans_WRHolderRankTablesSuccess, Trans_WRHolderRankTablesError, 0, DBPrio_High);
 }
 
 public void Trans_WRHolderRankTablesSuccess(Database db, any data, int numQueries, DBResultSet[] results, any[] queryData)
@@ -1343,7 +1376,7 @@ void RefreshWRHoldersActually()
 		);
 	}
 
-	gH_SQL.Query2(SQL_GetWRHolders_Callback, sQuery);
+	QueryLog(gH_SQL, SQL_GetWRHolders_Callback, sQuery);
 
 	gB_WRHoldersRefreshed = true;
 }
@@ -1498,7 +1531,7 @@ public int Native_Rankings_DeleteMap(Handle handler, int numParams)
 
 	char sQuery[512];
 	FormatEx(sQuery, sizeof(sQuery), "DELETE FROM %smaptiers WHERE map = '%s';", gS_MySQLPrefix, sMap);
-	gH_SQL.Query2(SQL_DeleteMap_Callback, sQuery, StrEqual(gS_Map, sMap, false), DBPrio_High);
+	QueryLog(gH_SQL, SQL_DeleteMap_Callback, sQuery, StrEqual(gS_Map, sMap, false), DBPrio_High);
 	return 1;
 }
 

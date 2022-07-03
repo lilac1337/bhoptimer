@@ -1,8 +1,9 @@
 /*
  * shavit's Timer - HUD
- * by: shavit
+ * by: shavit, strafe, KiD Fearless, rtldg, Technoblazed, Nairda, Nuko, GAMMA CASE
  *
- * This file is part of shavit's Timer.
+ * This file is part of shavit's Timer (https://github.com/shavitush/bhoptimer)
+ *
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 3.0, as published by the
@@ -16,7 +17,7 @@
  * You should have received a copy of the GNU General Public License along with
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *
-*/
+ */
 
 #include <sourcemod>
 #include <sdktools>
@@ -118,7 +119,7 @@ chatstrings_t gS_ChatStrings;
 public Plugin myinfo =
 {
 	name = "[shavit] HUD",
-	author = "shavit",
+	author = "shavit, strafe, KiD Fearless, rtldg, Technoblazed, Nairda, Nuko, GAMMA CASE",
 	description = "HUD for shavit's bhop timer.",
 	version = SHAVIT_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -1777,6 +1778,20 @@ void UpdateMainHUD(int client)
 	huddata.iPreviousSpeed = gI_PreviousSpeed[client];
 	huddata.iMapTier = gB_Rankings ? Shavit_GetMapTier() : 0;
 
+	if (IsValidClient(target))
+	{
+		huddata.fAngleDiff = gF_AngleDiff[target];
+		huddata.iButtons = gI_Buttons[target];
+		huddata.iScrolls = gI_ScrollCount[target];
+		huddata.iScrollsPrev = gI_LastScrollCount[target];
+	}
+	else
+	{
+		huddata.iButtons = Shavit_GetReplayButtons(target, huddata.fAngleDiff);
+		huddata.iScrolls = -1;
+		huddata.iScrollsPrev = -1;
+	}
+
 	huddata.fClosestReplayTime = -1.0;
 	huddata.fClosestVelocityDifference = 0.0;
 	huddata.fClosestReplayLength = 0.0;
@@ -1980,7 +1995,8 @@ void UpdateCenterKeys(int client)
 		style = 0;
 	}
 
-	char sCenterText[254];
+	char sCenterText[512];
+	int usable_size = (gEV_Type == Engine_CSGO) ? 512 : 254;
 
 	Action preresult = Plugin_Continue;
 	Call_StartForward(gH_Forwards_PreOnDrawKeysHUD);
@@ -1989,8 +2005,8 @@ void UpdateCenterKeys(int client)
 	Call_PushCell(style);
 	Call_PushCell(buttons);
 	Call_PushCell(fAngleDiff);
-	Call_PushStringEx(sCenterText, sizeof(sCenterText), SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
-	Call_PushCell(sizeof(sCenterText));
+	Call_PushStringEx(sCenterText, usable_size, SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+	Call_PushCell(usable_size);
 	Call_PushCell(scrolls);
 	Call_PushCell(prevscrolls);
 	Call_PushCell(gB_AlternateCenterKeys[client]);
@@ -2003,7 +2019,7 @@ void UpdateCenterKeys(int client)
 
 	if (preresult == Plugin_Continue)
 	{
-		FillCenterKeys(client, target, style, buttons, fAngleDiff, sCenterText, sizeof(sCenterText));
+		FillCenterKeys(client, target, style, buttons, fAngleDiff, sCenterText, usable_size);
 	}
 
 	if (IsSource2013(gEV_Type))

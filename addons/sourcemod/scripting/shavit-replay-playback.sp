@@ -1,8 +1,9 @@
 /*
  * shavit's Timer - Replay Bot Playback
- * by: shavit
+ * by: shavit, rtldg, carnifex, KiD Fearless
  *
- * This file is part of shavit's Timer.
+ * This file is part of shavit's Timer (https://github.com/shavitush/bhoptimer)
+ *
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 3.0, as published by the
@@ -16,7 +17,7 @@
  * You should have received a copy of the GNU General Public License along with
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *
-*/
+ */
 
 #include <sourcemod>
 #include <sdktools>
@@ -162,6 +163,7 @@ float gF_VelocityDifference2D[MAXPLAYERS+1];
 float gF_VelocityDifference3D[MAXPLAYERS+1];
 
 bool gB_Late = false;
+bool gB_AdminMenu = false;
 
 // forwards
 Handle gH_OnReplayStart = null;
@@ -187,6 +189,8 @@ Handle gH_BotAddCommand = INVALID_HANDLE;
 Handle gH_DoAnimationEvent = INVALID_HANDLE;
 DynamicHook gH_UpdateStepSound = null;
 DynamicDetour gH_MaintainBotQuota = null;
+DynamicDetour gH_UpdateHibernationState = null;
+bool gB_DisableHibernation = false;
 DynamicDetour gH_TeamFull = null;
 bool gB_TeamFullDetoured = false;
 int gI_WEAPONTYPE_UNKNOWN = 123123123;
@@ -216,6 +220,7 @@ Convar gCV_DynamicTimeSearch = null;
 Convar gCV_DynamicTimeCheap = null;
 Convar gCV_DynamicTimeTick = null;
 Convar gCV_EnableDynamicTimeDifference = null;
+Convar gCV_DisableHibernation = null;
 ConVar sv_duplicate_playernames_ok = null;
 ConVar bot_join_after_player = null;
 ConVar mp_randomspawn = null;
@@ -236,7 +241,7 @@ TopMenu gH_AdminMenu = null;
 TopMenuObject gH_TimerCommands = INVALID_TOPMENUOBJECT;
 
 // database related things
-Database2 gH_SQL = null;
+Database gH_SQL = null;
 char gS_MySQLPrefix[32];
 
 bool gB_ClosestPos;
@@ -245,7 +250,7 @@ ClosestPos gH_ClosestPos[TRACKS_SIZE][STYLE_LIMIT];
 public Plugin myinfo =
 {
 	name = "[shavit] Replay Bot",
-	author = "shavit",
+	author = "shavit, rtldg, carnifex, KiD Fearless",
 	description = "A replay bot for shavit's bhop timer.",
 	version = SHAVIT_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -322,12 +327,6 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 
 public void OnAllPluginsLoaded()
 {
-	// admin menu
-	if(LibraryExists("adminmenu") && ((gH_AdminMenu = GetAdminTopMenu()) != null))
-	{
-		OnAdminMenuReady(gH_AdminMenu);
-	}
-
 	if (LibraryExists("closestpos"))
 	{
 		gB_ClosestPos = true;
@@ -415,6 +414,12 @@ public void OnPluginStart()
 	gCV_DynamicTimeSearch = new Convar("shavit_replay_timedifference_search", "60.0", "Time in seconds to search the players current frame for dynamic time differences\n0 - Full Scan\nNote: Higher values will result in worse performance", 0, true, 0.0);
 	gCV_EnableDynamicTimeDifference = new Convar("shavit_replay_timedifference", "1", "Enabled dynamic time/velocity differences for the hud", 0, true, 0.0, true, 1.0);
 
+	if (gEV_Type == Engine_CSS)
+	{
+		gCV_DisableHibernation = new Convar("shavit_replay_disable_hibernation", "0", "Whether to disable server hibernation...", 0, true, 0.0, true, 1.0);
+		gCV_DisableHibernation.AddChangeHook(OnConVarChanged);
+	}
+
 	char tenth[6];
 	IntToString(RoundToFloor(1.0 / GetTickInterval() / 10), tenth, sizeof(tenth));
 	gCV_DynamicTimeTick = new Convar("shavit_replay_timedifference_tick", tenth, "How often (in ticks) should the time difference update.\nYou should probably keep this around 0.1s worth of ticks.\nThe maximum value is your tickrate.", 0, true, 1.0, true, (1.0 / GetTickInterval()));
@@ -451,16 +456,23 @@ public void OnPluginStart()
 
 	// database
 	GetTimerSQLPrefix(gS_MySQLPrefix, 32);
-	gH_SQL = GetTimerDatabaseHandle2();
+	gH_SQL = GetTimerDatabaseHandle();
 
 	LoadDHooks();
 
 	CreateAllNavFiles();
 
+	gB_AdminMenu = LibraryExists("adminmenu");
+
 	if(gB_Late)
 	{
 		Shavit_OnStyleConfigLoaded(Shavit_GetStyleCount());
 		Shavit_OnChatConfigLoaded();
+
+		if (gB_AdminMenu && (gH_AdminMenu = GetAdminTopMenu()) != null)
+		{
+			OnAdminMenuReady(gH_AdminMenu);
+		}
 	}
 
 	for(int i = 1; i < sizeof(gA_BotInfo); i++)
@@ -545,6 +557,18 @@ void LoadDHooks()
 
 	if (gEV_Type == Engine_CSS)
 	{
+		if (!(gH_UpdateHibernationState = DHookCreateDetour(Address_Null, CallConv_THISCALL, ReturnType_Void, ThisPointer_Address)))
+		{
+			LogError("Failed to create detour for CGameServer::UpdateHibernationState");
+		}
+		else
+		{
+			if (!DHookSetFromConf(gH_UpdateHibernationState, gamedata, SDKConf_Signature, "CGameServer::UpdateHibernationState"))
+			{
+				LogError("Failed to get address for CGameServer::UpdateHibernationState");
+			}
+		}
+
 		if (!(gH_TeamFull = DHookCreateDetour(Address_Null, CallConv_THISCALL, ReturnType_Bool, ThisPointer_Address)))
 		{
 			SetFailState("Failed to create detour for CCSGameRules::TeamFull");
@@ -585,6 +609,11 @@ void LoadDHooks()
 	}
 
 	delete gamedata;
+}
+
+public MRESReturn Detour_UpdateHibernationState(int pThis)
+{
+	return MRES_Supercede;
 }
 
 // Stops bot_quota from doing anything.
@@ -629,10 +658,7 @@ public void OnLibraryAdded(const char[] name)
 {
 	if (strcmp(name, "adminmenu") == 0)
 	{
-		if ((gH_AdminMenu = GetAdminTopMenu()) != null)
-		{
-			OnAdminMenuReady(gH_AdminMenu);
-		}
+		gB_AdminMenu = true;
 	}
 	else if (strcmp(name, "closestpos") == 0)
 	{
@@ -644,6 +670,7 @@ public void OnLibraryRemoved(const char[] name)
 {
 	if (strcmp(name, "adminmenu") == 0)
 	{
+		gB_AdminMenu = false;
 		gH_AdminMenu = null;
 		gH_TimerCommands = INVALID_TOPMENUOBJECT;
 	}
@@ -661,6 +688,19 @@ public Action CommandListener_changelevel(int client, const char[] command, int 
 
 public void OnConVarChanged(ConVar convar, const char[] oldValue, const char[] newValue)
 {
+	if (gCV_DisableHibernation != null && convar == gCV_DisableHibernation)
+	{
+		if (gH_UpdateHibernationState && convar.BoolValue != gB_DisableHibernation)
+		{
+			if ((gB_DisableHibernation = convar.BoolValue))
+				gH_UpdateHibernationState.Enable(Hook_Pre, Detour_UpdateHibernationState);
+			else
+				gH_UpdateHibernationState.Disable(Hook_Pre, Detour_UpdateHibernationState);
+		}
+
+		return;
+	}
+
 	KickAllReplays();
 }
 
@@ -683,47 +723,12 @@ public void OnForcedConVarChanged(ConVar convar, const char[] oldValue, const ch
 	}
 }
 
-public void OnAdminMenuCreated(Handle topmenu)
+public void OnAdminMenuReady(Handle topmenu)
 {
-	if(gH_AdminMenu == null || (topmenu == gH_AdminMenu && gH_TimerCommands != INVALID_TOPMENUOBJECT))
-	{
-		return;
-	}
+	gH_AdminMenu = TopMenu.FromHandle(topmenu);
 
 	if ((gH_TimerCommands = gH_AdminMenu.FindCategory("Timer Commands")) != INVALID_TOPMENUOBJECT)
 	{
-		return;
-	}
-
-	gH_TimerCommands = gH_AdminMenu.AddCategory("Timer Commands", CategoryHandler, "shavit_admin", ADMFLAG_RCON);
-}
-
-public void CategoryHandler(Handle topmenu, TopMenuAction action, TopMenuObject object_id, int param, char[] buffer, int maxlength)
-{
-	if(action == TopMenuAction_DisplayTitle)
-	{
-		FormatEx(buffer, maxlength, "%T:", "TimerCommands", param);
-	}
-	else if(action == TopMenuAction_DisplayOption)
-	{
-		FormatEx(buffer, maxlength, "%T", "TimerCommands", param);
-	}
-}
-
-public void OnAdminMenuReady(Handle topmenu)
-{
-	if((gH_AdminMenu = GetAdminTopMenu()) != null)
-	{
-		if(gH_TimerCommands == INVALID_TOPMENUOBJECT)
-		{
-			gH_TimerCommands = gH_AdminMenu.FindCategory("Timer Commands");
-
-			if(gH_TimerCommands == INVALID_TOPMENUOBJECT)
-			{
-				OnAdminMenuCreated(topmenu);
-			}
-		}
-
 		gH_AdminMenu.AddItem("sm_deletereplay", AdminMenu_DeleteReplay, gH_TimerCommands, "sm_deletereplay", ADMFLAG_RCON);
 	}
 }
@@ -827,7 +832,7 @@ bool LoadReplay(frame_cache_t cache, int style, int track, const char[] path, co
 		hPack.WriteCell(style);
 		hPack.WriteCell(track);
 
-		gH_SQL.Query2(SQL_GetUserName_Callback, sQuery, hPack, DBPrio_High);
+		QueryLog(gH_SQL, SQL_GetUserName_Callback, sQuery, hPack, DBPrio_High);
 	}
 
 	return ret;
@@ -1142,7 +1147,7 @@ public int Native_StartReplayFromFile(Handle handler, int numParams)
 	{
 		char sQuery[192];
 		FormatEx(sQuery, sizeof(sQuery), "SELECT name FROM %susers WHERE auth = %d;", gS_MySQLPrefix, cache.iSteamID);
-		gH_SQL.Query2(SQL_GetUserName_Botref_Callback, sQuery, EntIndexToEntRef(bot), DBPrio_High);
+		QueryLog(gH_SQL, SQL_GetUserName_Botref_Callback, sQuery, EntIndexToEntRef(bot), DBPrio_High);
 	}
 
 	return bot;
@@ -1425,7 +1430,7 @@ public int Native_GetLoopingBotByName(Handle plugin, int numParams)
 		return -1;
 	}
 
-	for (int i = 1; i <= MAXPLAYERS; i++)
+	for (int i = 1; i <= MaxClients; i++)
 	{
 		if (gA_BotInfo[i].iType == Replay_Looping && gA_BotInfo[i].iLoopingConfig == configid)
 		{
@@ -2831,7 +2836,7 @@ public Action Command_DeleteReplay(int client, int args)
 		menu.AddItem("-1", sMenuItem);
 	}
 
-	menu.ExitButton = true;
+	menu.ExitBackButton = true;
 	menu.Display(client, MENU_TIME_FOREVER);
 
 	return Plugin_Handled;
@@ -2878,6 +2883,10 @@ public int DeleteReplay_Callback(Menu menu, MenuAction action, int param1, int p
 
 		submenu.ExitButton = true;
 		submenu.Display(param1, MENU_TIME_FOREVER);
+	}
+	else if (action == MenuAction_Cancel && param2 == MenuCancel_ExitBack)
+	{
+		gH_AdminMenu.DisplayCategory(gH_TimerCommands, param1);
 	}
 	else if(action == MenuAction_End)
 	{

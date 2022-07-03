@@ -1,3 +1,24 @@
+/*
+ * shavit's Timer - mapchooser aaaaaaa
+ * by: various alliedmodders(?), SlidyBat, KiD Fearless, mbhound, rtldg, lilac, Sirhephaestus
+ *
+ * This file is part of shavit's Timer (https://github.com/shavitush/bhoptimer)
+ *
+ *
+ * This program is free software; you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License, version 3.0, as published by the
+ * Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
 #pragma semicolon 1
 #pragma newdecls required
 
@@ -19,7 +40,7 @@
 #undef REQUIRE_EXTENSIONS
 #include <cstrike>
 
-Database2 g_hDatabase;
+Database g_hDatabase;
 char g_cSQLPrefix[32];
 
 bool g_bDebug;
@@ -132,7 +153,7 @@ enum
 public Plugin myinfo =
 {
 	name = "[shavit] MapChooser",
-	author = "SlidyBat, kidfearless, mbhound, lilac, rtldg",
+	author = "various alliedmodders(?), SlidyBat, KiD Fearless, mbhound, rtldg, lilac, Sirhephaestus",
 	description = "Automated Map Voting and nominating with Shavit's bhoptimer integration",
 	version = SHAVIT_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -1024,7 +1045,7 @@ public int Handler_MapVoteMenu(Menu menu, MenuAction action, int param1, int par
 public void Shavit_OnDatabaseLoaded()
 {
 	GetTimerSQLPrefix(g_cSQLPrefix, sizeof(g_cSQLPrefix));
-	g_hDatabase = view_as<Database2>(Shavit_GetDatabase());
+	g_hDatabase = Shavit_GetDatabase();
 }
 
 void RemoveExcludesFromArrayList(ArrayList list, bool lowercase, char[][] exclude_prefixes, int exclude_count)
@@ -1065,13 +1086,13 @@ void LoadMapList()
 		{
 			if (g_hDatabase == null)
 			{
-				g_hDatabase = GetTimerDatabaseHandle2();
+				g_hDatabase = GetTimerDatabaseHandle();
 			}
 
 			char buffer[512];
 
 			FormatEx(buffer, sizeof(buffer), "SELECT `map` FROM `%smapzones` WHERE `type` = 1 AND `track` = 0 ORDER BY `map`", g_cSQLPrefix);
-			g_hDatabase.Query2(LoadZonedMapsCallback, buffer, _, DBPrio_High);
+			QueryLog(g_hDatabase, LoadZonedMapsCallback, buffer, _, DBPrio_High);
 		}
 		case MapListFolder:
 		{
@@ -1088,7 +1109,7 @@ void LoadMapList()
 		{
 			if (g_hDatabase == null)
 			{
-				g_hDatabase = GetTimerDatabaseHandle2();
+				g_hDatabase = GetTimerDatabaseHandle();
 			}
 
 			if (g_cvMapListType.IntValue == MapListMixed)
@@ -1103,7 +1124,7 @@ void LoadMapList()
 
 			char buffer[512];
 			FormatEx(buffer, sizeof(buffer), "SELECT `map` FROM `%smapzones` WHERE `type` = 1 AND `track` = 0 ORDER BY `map`", g_cSQLPrefix);
-			g_hDatabase.Query2(LoadZonedMapsCallbackMixed, buffer, _, DBPrio_High);
+			QueryLog(g_hDatabase, LoadZonedMapsCallbackMixed, buffer, _, DBPrio_High);
 		}
 	}
 }
@@ -1784,12 +1805,17 @@ public Action Command_RockTheVote(int client, int args)
 	{
 		ReplyToCommand(client, "%sYou must be a higher rank to RTV!", g_cPrefix);
 	}
-	else if(GetClientTeam(client) == CS_TEAM_SPECTATOR && !g_cvRTVAllowSpectators.BoolValue)
-	{
-		ReplyToCommand(client, "%sSpectators have been blocked from RTVing", g_cPrefix);
-	}
 	else
 	{
+		if (GetClientTeam(client) == CS_TEAM_SPECTATOR && !g_cvRTVAllowSpectators.BoolValue)
+		{
+			if ((GetEngineTime() - g_fSpecTimerStart[client]) >= g_cvRTVSpectatorCooldown.FloatValue)
+			{
+				ReplyToCommand(client, "%sSpectators have been blocked from RTVing", g_cPrefix);
+				return Plugin_Handled;
+			}
+		}
+
 		if (g_fLastRtvTime[client] && (GetEngineTime() - g_fLastRtvTime[client]) < g_cvAntiSpam.FloatValue)
 		{
 			ReplyToCommand(client, "%sStop spamming", g_cPrefix);
@@ -1994,7 +2020,7 @@ public Action Command_LoadUnzonedMap(int client, int args)
 {
 	char sQuery[256];
 	FormatEx(sQuery, sizeof(sQuery), "SELECT DISTINCT map FROM %smapzones;", g_cSQLPrefix);
-	g_hDatabase.Query2(FindUnzonedMapCallback, sQuery, 0, DBPrio_Normal);
+	QueryLog(g_hDatabase, FindUnzonedMapCallback, sQuery, 0, DBPrio_Normal);
 	return Plugin_Handled;
 }
 
