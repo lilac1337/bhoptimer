@@ -1,8 +1,9 @@
 /*
  * shavit's Timer - core.inc file
- * by: shavit
+ * by: shavit, KiD Fearless, rtldg, Nairda, GAMMA CASE, carnifex,
  *
- * This file is part of shavit's Timer.
+ * This file is part of shavit's Timer (https://github.com/shavitush/bhoptimer)
+ *
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 3.0, as published by the
@@ -16,17 +17,21 @@
  * You should have received a copy of the GNU General Public License along with
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *
-*/
+ */
 
 #if defined _shavit_core_included
 	#endinput
 #endif
 #define _shavit_core_included
 
-#define SHAVIT_VERSION "3.2.1a"
+#define SHAVIT_VERSION "3.3.0"
 #define STYLE_LIMIT 256
 
-#define SHAVIT_LOG_QUERIES 0
+// god i fucking hate sourcemod. NULL_VECTOR isn't const so it's not guaranteed to be 0,0,0
+#define ZERO_VECTOR view_as<float>({0,0,0})
+
+// stolen from boosterfix
+#define EXPAND_VECTOR(%1) %1[0], %1[1], %1[2]
 
 #include <shavit/bhopstats-timerified>
 
@@ -113,7 +118,7 @@ enum struct timer_snapshot_t
 	int iTotalMeasures;
 	int iGoodGains;
 	float fServerTime;
-	int iSHSWCombination;
+	int iKeyCombo;
 	int iTimerTrack;
 	int iMeasuredJumps;
 	int iPerfectJumps;
@@ -150,6 +155,17 @@ enum struct timer_snapshot_t
 stock void Shavit_LogQuery(const char[] query)
 {
 	static File hLogFile;
+	static ConVar shavit_core_log_sql = null;
+
+	if (shavit_core_log_sql == null)
+	{
+		shavit_core_log_sql = FindConVar("shavit_core_log_sql");
+	}
+
+	if (!shavit_core_log_sql || !shavit_core_log_sql.BoolValue)
+	{
+		return;
+	}
 
 	if (hLogFile == null)
 	{
@@ -172,35 +188,20 @@ stock void Shavit_LogQuery(const char[] query)
 	}
 }
 
-methodmap Database2 < Database
+stock void QueryLog(Database db, SQLQueryCallback callback, const char[] query, any data = 0, DBPriority prio = DBPrio_Normal)
 {
-	public void Query2(SQLQueryCallback callback, const char[] query, any data = 0, DBPriority prio = DBPrio_Normal)
-	{
-#if SHAVIT_LOG_QUERIES
-		Shavit_LogQuery(query);
-#endif
-		this.Query(callback, query, data, prio);
-	}
+	Shavit_LogQuery(query);
+	db.Query(callback, query, data, prio);
 }
 
-methodmap Transaction2 < Transaction
+stock int AddQueryLog(Transaction trans, const char[] query, any data = 0)
 {
-	public Transaction2()
-	{
-		return view_as<Transaction2>(new Transaction());
-	}
-
-	public int AddQuery2(const char[] query, any data = 0)
-	{
-#if SHAVIT_LOG_QUERIES
-		Shavit_LogQuery(query);
-#endif
-		return this.AddQuery(query, data);
-	}
+	Shavit_LogQuery(query);
+	return trans.AddQuery(query, data);
 }
 
 // connects synchronously to the bhoptimer database
-// calls errors if needed
+// call errors if needed
 stock Database GetTimerDatabaseHandle(bool reuse_persistent_connection=true)
 {
 	Database db = null;
@@ -227,18 +228,26 @@ stock Database GetTimerDatabaseHandle(bool reuse_persistent_connection=true)
 	return db;
 }
 
-stock Database2 GetTimerDatabaseHandle2(bool reuse_persistent_connection=true)
-{
-	return view_as<Database2>(GetTimerDatabaseHandle(reuse_persistent_connection));
+enum {
+	Driver_unknown,
+	Driver_sqlite,
+	Driver_mysql,
+	Driver_pgsql,
 }
 
-// figures out if the database is a mysql database
-stock bool IsMySQLDatabase(Database db)
+stock int GetDatabaseDriver(Database db)
 {
-	char sDriver[8];
-	db.Driver.GetIdentifier(sDriver, 8);
+	char sDriver[16];
+	db.Driver.GetIdentifier(sDriver, sizeof(sDriver));
 
-	return StrEqual(sDriver, "mysql", false);
+	if (StrEqual(sDriver, "mysql", false))
+		return Driver_mysql;
+	else if (StrEqual(sDriver, "sqlite", false))
+		return Driver_sqlite;
+	else if (StrEqual(sDriver, "pgsql", false))
+		return Driver_pgsql;
+	else
+		return Driver_unknown;
 }
 
 stock void LowercaseString(char[] str)
@@ -912,7 +921,7 @@ forward void Shavit_OnCountdownStart();
  *
  * @return							Database handle.
  */
-native Database Shavit_GetDatabase();
+native Database Shavit_GetDatabase(int& outdriver=0);
 
 /**
  * Starts the timer for a player.
@@ -1417,6 +1426,17 @@ native float Shavit_GetClientTimescale(int client);
 native void Shavit_UpdateLaggedMovement(int client, bool user_timescale=true);
 
 /**
+ * Used in shavit-wr and shavit-stats to share the last printed steamid.
+ *
+ * @param client                    Client index to print to
+ * @param steamid                   The steamid to print (or not if it's the same as last printed)
+ * @param targetname                The player name that the steamid belongs to.
+ *
+ * @noreturn
+ */
+native void Shavit_PrintSteamIDOnce(int client, int steamid, const char[] targetname);
+
+/**
  * When using the timer's timescale_tas stuff, this returns whether the current frame should be recorded by replay plugins.
  *
  * @param client                    Client index
@@ -1501,6 +1521,7 @@ public void __pl_shavit_core_SetNTVOptional()
 	MarkNativeAsOptional("Shavit_ShouldProcessFrame");
 	MarkNativeAsOptional("Shavit_GotoEnd");
 	MarkNativeAsOptional("Shavit_UpdateLaggedMovement");
+	MarkNativeAsOptional("Shavit_PrintSteamIDOnce");
 
 	__pl_shavit_bhopstats_SetNTVOptional();
 }

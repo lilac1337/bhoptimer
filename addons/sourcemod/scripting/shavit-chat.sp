@@ -1,8 +1,9 @@
 /*
  * shavit's Timer - Chat
- * by: shavit
+ * by: shavit, Nairda, GAMMA CASE, Kid Fearless, rtldg, BoomShotKapow
  *
- * This file is part of shavit's Timer.
+ * This file is part of shavit's Timer (https://github.com/shavitush/bhoptimer)
+ *
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 3.0, as published by the
@@ -16,7 +17,7 @@
  * You should have received a copy of the GNU General Public License along with
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *
-*/
+ */
 
 // Note: For donator perks, give donators a custom flag and then override it to have "shavit_chat".
 
@@ -72,7 +73,7 @@ enum
 #pragma semicolon 1
 
 // database
-Database2 gH_SQL = null;
+Database gH_SQL = null;
 char gS_MySQLPrefix[32];
 
 // modules
@@ -102,12 +103,10 @@ bool gB_ChatRanksMenuOnlyUnlocked[MAXPLAYERS+1];
 bool gB_ChangedSinceLogin[MAXPLAYERS+1];
 
 bool gB_CCAccess[MAXPLAYERS+1];
-
-bool gB_NameEnabled[MAXPLAYERS+1];
 char gS_CustomName[MAXPLAYERS+1][128];
-
-bool gB_MessageEnabled[MAXPLAYERS+1];
 char gS_CustomMessage[MAXPLAYERS+1][16];
+
+bool gB_AdminChecked[MAXPLAYERS+1];
 
 chatstrings_t gS_ChatStrings;
 
@@ -122,7 +121,7 @@ char gS_ControlCharacters[][] = {"\x01", "\x02", "\x03", "\x04", "\x05", "\x06",
 public Plugin myinfo =
 {
 	name = "[shavit] Chat Processor",
-	author = "shavit",
+	author = "shavit, Nairda, GAMMA CASE, Kid Fearless, rtldg, BoomShotKapow",
 	description = "Custom chat privileges (custom name/message colors), chat processor, and rankings integration.",
 	version = SHAVIT_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -193,6 +192,7 @@ public void OnPluginStart()
 
 			if (IsClientAuthorized(i))
 			{
+				OnClientAuthorized(i, "");
 				OnClientPostAdminCheck(i);
 			}
 		}
@@ -626,24 +626,25 @@ public void OnClientCookiesCached(int client)
 
 	if(strlen(sChatSettings) == 0)
 	{
-		SetClientCookie(client, gH_ChatCookie, "-2");
 		gI_ChatSelection[client] = -2;
 	}
 	else
 	{
 		gI_ChatSelection[client] = StringToInt(sChatSettings);
+
+		if (gB_AdminChecked[client] && !HasRankAccess(client, gI_ChatSelection[client]))
+		{
+			SetClientCookie(client, gH_ChatCookie, "-2");
+			gI_ChatSelection[client] = -2;
+		}
 	}
 }
 
 public void OnClientConnected(int client)
 {
 	gB_CCAccess[client] = false;
-
-	gB_NameEnabled[client] = true;
-	strcopy(gS_CustomName[client], 128, "{team}{name}");
-
-	gB_MessageEnabled[client] = true;
-	strcopy(gS_CustomMessage[client], 128, "{default}");
+	strcopy(gS_CustomName[client], sizeof(gS_CustomName[]), "{team}{name}");
+	strcopy(gS_CustomMessage[client], sizeof(gS_CustomMessage[]), "{default}");
 }
 
 public void OnClientDisconnect(int client)
@@ -652,13 +653,50 @@ public void OnClientDisconnect(int client)
 	{
 		SaveToDatabase(client);
 	}
+
+	gB_AdminChecked[client] = false;
 }
 
-public void OnClientPostAdminCheck(int client)
+public void OnClientAuthorized(int client, const char[] auth)
 {
 	if (gH_SQL)
 	{
 		LoadFromDatabase(client);
+	}
+}
+
+public void OnClientPostAdminCheck(int client)
+{
+	gB_AdminChecked[client] = true;
+
+	if (AreClientCookiesCached(client))
+	{
+		if (!HasRankAccess(client, gI_ChatSelection[client]))
+		{
+			SetClientCookie(client, gH_ChatCookie, "-2");
+			gI_ChatSelection[client] = -2;
+		}
+	}
+}
+
+Action Timer_RefreshAdmins(Handle timer, any data)
+{
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsValidClient(i) && !IsFakeClient(i) && IsClientAuthorized(i))
+		{
+			OnClientPostAdminCheck(i);
+		}
+	}
+
+	return Plugin_Stop;
+}
+
+public void OnRebuildAdminCache(AdminCachePart part)
+{
+	if (part == AdminCache_Overrides) // the last of the 3 parts when I tested
+	{
+		CreateTimer(2.5, Timer_RefreshAdmins, 0, TIMER_FLAG_NO_MAPCHANGE);
 	}
 }
 
@@ -715,27 +753,25 @@ public Action Command_CCName(int client, int args)
 	if(args == 0 || strlen(sArgs) == 0)
 	{
 		Shavit_PrintToChat(client, "%T", "ArgumentsMissing", client, "sm_ccname <text>");
-		Shavit_PrintToChat(client, "%T", "ChatCurrent", client, !strlen(gS_CustomName[client]) ? "off" : gS_CustomName[client]);
+		Shavit_PrintToChat(client, "%T", "ChatCurrent", client, gS_CustomName[client]);
 
 		return Plugin_Handled;
 	}
 	else if(StrEqual(sArgs, "off"))
 	{
 		Shavit_PrintToChat(client, "%T", "NameOff", client, sArgs);
-
-		gB_NameEnabled[client] = false;
-
-		return Plugin_Handled;
+		sArgs = "{team}{name}";
 	}
-
-	Shavit_PrintToChat(client, "%T", "ChatUpdated", client);
+	else
+	{
+		Shavit_PrintToChat(client, "%T", "ChatUpdated", client);
+	}
 
 	if(!StrEqual(gS_CustomName[client], sArgs))
 	{
 		gB_ChangedSinceLogin[client] = true;
 	}
 
-	gB_NameEnabled[client] = true;
 	strcopy(gS_CustomName[client], 128, sArgs);
 
 	return Plugin_Handled;
@@ -764,27 +800,25 @@ public Action Command_CCMessage(int client, int args)
 	if(args == 0 || strlen(sArgs) == 0)
 	{
 		Shavit_PrintToChat(client, "%T", "ArgumentsMissing", client, "sm_ccmsg <text>");
-		Shavit_PrintToChat(client, "%T", "ChatCurrent", client, !strlen(gS_CustomMessage[client]) ? "off" : gS_CustomMessage[client]);
+		Shavit_PrintToChat(client, "%T", "ChatCurrent", client, gS_CustomMessage[client]);
 
 		return Plugin_Handled;
 	}
 	else if(StrEqual(sArgs, "off"))
 	{
 		Shavit_PrintToChat(client, "%T", "MessageOff", client, sArgs);
-
-		gB_MessageEnabled[client] = false;
-
-		return Plugin_Handled;
+		sArgs = "{default}";
 	}
-
-	Shavit_PrintToChat(client, "%T", "ChatUpdated", client);
+	else
+	{
+		Shavit_PrintToChat(client, "%T", "ChatUpdated", client);
+	}
 
 	if(!StrEqual(gS_CustomMessage[client], sArgs))
 	{
 		gB_ChangedSinceLogin[client] = true;
 	}
 
-	gB_MessageEnabled[client] = true;
 	strcopy(gS_CustomMessage[client], 16, sArgs);
 
 	return Plugin_Handled;
@@ -1132,31 +1166,13 @@ bool HasRankAccess(int client, int rank)
 
 void GetPlayerChatSettings(int client, char[] name, char[] message, int iRank)
 {
-#if 0
-	if(!HasRankAccess(client, iRank))
-	{
-		iRank = -2;
-	}
-#endif
-
 	int iLength = gA_ChatRanks.Length;
 
 	if (iRank == -1)
 	{
-		if (gB_NameEnabled[client])
-		{
-			strcopy(name, MAXLENGTH_NAME, gS_CustomName[client]);
-		}
-
-		if (gB_MessageEnabled[client])
-		{
-			strcopy(message, MAXLENGTH_NAME, gS_CustomMessage[client]);
-		}
-
-		if (name[0] && message[0])
-		{
-			return;
-		}
+		strcopy(name, MAXLENGTH_NAME, gS_CustomName[client]);
+		strcopy(message, MAXLENGTH_NAME, gS_CustomMessage[client]);
+		return;
 	}
 
 	// if we auto-assign, start looking for an available rank starting from index 0
@@ -1235,7 +1251,7 @@ public Action Command_CCAdd(int client, int args)
 
 	char sQuery[128];
 	FormatEx(sQuery, sizeof(sQuery), "REPLACE INTO %schat (auth, ccaccess) VALUES (%d, 1);", gS_MySQLPrefix, iSteamID);
-	gH_SQL.Query2(SQL_UpdateUser_Callback, sQuery, 0, DBPrio_Low);
+	QueryLog(gH_SQL, SQL_UpdateUser_Callback, sQuery, 0, DBPrio_Low);
 
 	for(int i = 1; i <= MaxClients; i++)
 	{
@@ -1247,6 +1263,7 @@ public Action Command_CCAdd(int client, int args)
 		}
 	}
 
+	Shavit_LogMessage("%L - granted CC access to [U:1:%u]", client, iSteamID);
 	ReplyToCommand(client, "Added CC access for %s", sArgString);
 
 	return Plugin_Handled;
@@ -1273,7 +1290,7 @@ public Action Command_CCDelete(int client, int args)
 
 	char sQuery[128];
 	FormatEx(sQuery, sizeof(sQuery), "UPDATE %schat SET ccaccess = 0 WHERE auth = %d;", gS_MySQLPrefix, iSteamID);
-	gH_SQL.Query2(SQL_UpdateUser_Callback, sQuery, 0, DBPrio_Low);
+	QueryLog(gH_SQL, SQL_UpdateUser_Callback, sQuery, 0, DBPrio_Low);
 
 	for(int i = 1; i <= MaxClients; i++)
 	{
@@ -1284,7 +1301,8 @@ public Action Command_CCDelete(int client, int args)
 		}
 	}
 
-	ReplyToCommand(client, "Deleted CC access for %s", sArgString);
+	Shavit_LogMessage("%L - deleted CC access from [U:1:%u]", client, iSteamID);
+	ReplyToCommand(client, "Deleted CC access from %s", sArgString);
 
 	return Plugin_Handled;
 }
@@ -1390,7 +1408,7 @@ void FormatChat(int client, char[] buffer, int size)
 public void Shavit_OnDatabaseLoaded()
 {
 	GetTimerSQLPrefix(gS_MySQLPrefix, 32);
-	gH_SQL = view_as<Database2>(Shavit_GetDatabase());
+	gH_SQL = Shavit_GetDatabase();
 
 	for(int i = 1; i <= MaxClients; i++)
 	{
@@ -1426,9 +1444,9 @@ void SaveToDatabase(int client)
 	char sQuery[512];
 	FormatEx(sQuery, 512,
 		"REPLACE INTO %schat (auth, name, ccname, message, ccmessage) VALUES (%d, %d, '%s', %d, '%s');",
-		gS_MySQLPrefix, iSteamID, gB_NameEnabled[client], sEscapedName, gB_MessageEnabled[client], sEscapedMessage);
+		gS_MySQLPrefix, iSteamID, 1, sEscapedName, 1, sEscapedMessage);
 
-	gH_SQL.Query2(SQL_UpdateUser_Callback, sQuery, 0, DBPrio_Low);
+	QueryLog(gH_SQL, SQL_UpdateUser_Callback, sQuery, 0, DBPrio_Low);
 }
 
 public void SQL_UpdateUser_Callback(Database db, DBResultSet results, const char[] error, any data)
@@ -1458,7 +1476,7 @@ void LoadFromDatabase(int client)
 	char sQuery[256];
 	FormatEx(sQuery, 256, "SELECT name, ccname, message, ccmessage, ccaccess FROM %schat WHERE auth = %d;", gS_MySQLPrefix, iSteamID);
 
-	gH_SQL.Query2(SQL_GetChat_Callback, sQuery, GetClientSerial(client), DBPrio_Low);
+	QueryLog(gH_SQL, SQL_GetChat_Callback, sQuery, GetClientSerial(client), DBPrio_Low);
 }
 
 public void SQL_GetChat_Callback(Database db, DBResultSet results, const char[] error, any data)
@@ -1482,16 +1500,7 @@ public void SQL_GetChat_Callback(Database db, DBResultSet results, const char[] 
 	while(results.FetchRow())
 	{
 		gB_CCAccess[client] = view_as<bool>(results.FetchInt(4));
-
-		if (!HasCustomChat(client))
-		{
-			return;
-		}
-
-		gB_NameEnabled[client] = view_as<bool>(results.FetchInt(0));
 		results.FetchString(1, gS_CustomName[client], 128);
-
-		gB_MessageEnabled[client] = view_as<bool>(results.FetchInt(2));
 		results.FetchString(3, gS_CustomMessage[client], 16);
 	}
 }
@@ -1525,7 +1534,7 @@ public int Native_GetPlainChatrank(Handle handler, int numParams)
 	bool includename = !(GetNativeCell(4) == 0);
 	int iChatrank = gI_ChatSelection[client];
 
-	if (HasCustomChat(client) && iChatrank == -1 && gB_NameEnabled[client])
+	if (iChatrank == -1 && HasCustomChat(client))
 	{
 		strcopy(buf, sizeof(buf), gS_CustomName[client]);
 	}

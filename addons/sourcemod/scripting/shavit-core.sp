@@ -1,8 +1,9 @@
 /*
  * shavit's Timer - Core
- * by: shavit
+ * by: shavit, rtldg, KiD Fearless, GAMMA CASE, Technoblazed, carnifex, ofirgall, Nairda, Extan, rumour, OliviaMourning, Nickelony, sh4hrazad, BoomShotKapow, strafe
  *
- * This file is part of shavit's Timer.
+ * This file is part of shavit's Timer (https://github.com/shavitush/bhoptimer)
+ *
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License, version 3.0, as published by the
@@ -45,6 +46,8 @@
 #include <shavit/sql-create-tables-and-migrations.sp>
 #include <shavit/physicsuntouch>
 
+#include <adminmenu>
+
 #pragma newdecls required
 #pragma semicolon 1
 
@@ -57,8 +60,8 @@ DynamicHook gH_AcceptInput; // used for hooking player_speedmod's AcceptInput
 DynamicHook gH_TeleportDhook = null;
 
 // database handle
-Database2 gH_SQL = null;
-bool gB_MySQL = false;
+Database gH_SQL = null;
+int gI_Driver = Driver_unknown;
 
 // forwards
 Handle gH_Forwards_Start = null;
@@ -119,6 +122,10 @@ bool gB_Zones = false;
 bool gB_ReplayPlayback = false;
 bool gB_Rankings = false;
 bool gB_HUD = false;
+bool gB_AdminMenu = false;
+
+TopMenu gH_AdminMenu = null;
+TopMenuObject gH_TimerCommands = INVALID_TOPMENUOBJECT;
 
 // cvars
 Convar gCV_Restart = null;
@@ -162,6 +169,7 @@ char gS_Verification[MAXPLAYERS+1][8];
 bool gB_CookiesRetrieved[MAXPLAYERS+1];
 float gF_ZoneAiraccelerate[MAXPLAYERS+1];
 float gF_ZoneSpeedLimit[MAXPLAYERS+1];
+int gI_LastPrintedSteamID[MAXPLAYERS+1];
 
 // kz support
 bool gB_KZMap[TRACKS_SIZE];
@@ -173,7 +181,7 @@ bool gB_KZMap[TRACKS_SIZE];
 public Plugin myinfo =
 {
 	name = "[shavit] Core",
-	author = "shavit",
+	author = "shavit, rtldg, KiD Fearless, GAMMA CASE, Technoblazed, carnifex, ofirgall, Nairda, Extan, rumour, OliviaMourning, Nickelony, sh4hrazad, BoomShotKapow, strafe",
 	description = "The core for shavit's bhop timer.",
 	version = SHAVIT_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -181,6 +189,8 @@ public Plugin myinfo =
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
+	new Convar("shavit_core_log_sql", "0", "Whether to log SQL queries from the timer.", 0, true, 0.0, true, 1.0);
+
 	Bhopstats_CreateNatives();
 	Shavit_Style_Settings_Natives();
 
@@ -225,6 +235,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("Shavit_ShouldProcessFrame", Native_ShouldProcessFrame);
 	CreateNative("Shavit_GotoEnd", Native_GotoEnd);
 	CreateNative("Shavit_UpdateLaggedMovement", Native_UpdateLaggedMovement);
+	CreateNative("Shavit_PrintSteamIDOnce", Native_PrintSteamIDOnce);
 
 	// registers library, check "bool LibraryExists(const char[] name)" in order to use with other plugins
 	RegPluginLibrary("shavit");
@@ -399,6 +410,7 @@ public void OnPluginStart()
 	gB_ReplayPlayback = LibraryExists("shavit-replay-playback");
 	gB_Rankings = LibraryExists("shavit-rankings");
 	gB_HUD = LibraryExists("shavit-hud");
+	gB_AdminMenu = LibraryExists("adminmenu");
 
 	// database connections
 	SQL_DBConnect();
@@ -406,6 +418,12 @@ public void OnPluginStart()
 	// late
 	if(gB_Late)
 	{
+		if (gB_AdminMenu && (gH_AdminMenu = GetAdminTopMenu()) != null)
+		{
+			OnAdminMenuCreated(gH_AdminMenu);
+			OnAdminMenuReady(gH_AdminMenu);
+		}
+
 		for(int i = 1; i <= MaxClients; i++)
 		{
 			if(IsValidClient(i))
@@ -414,6 +432,33 @@ public void OnPluginStart()
 			}
 		}
 	}
+}
+
+public void OnAdminMenuCreated(Handle topmenu)
+{
+	gH_AdminMenu = TopMenu.FromHandle(topmenu);
+
+	if ((gH_TimerCommands = gH_AdminMenu.FindCategory("Timer Commands")) == INVALID_TOPMENUOBJECT)
+	{
+		gH_TimerCommands = gH_AdminMenu.AddCategory("Timer Commands", CategoryHandler, "shavit_admin", ADMFLAG_RCON);
+	}
+}
+
+public void CategoryHandler(Handle topmenu, TopMenuAction action, TopMenuObject object_id, int param, char[] buffer, int maxlength)
+{
+	if(action == TopMenuAction_DisplayTitle)
+	{
+		FormatEx(buffer, maxlength, "%T:", "TimerCommands", param);
+	}
+	else if(action == TopMenuAction_DisplayOption)
+	{
+		FormatEx(buffer, maxlength, "%T", "TimerCommands", param);
+	}
+}
+
+public void OnAdminMenuReady(Handle topmenu)
+{
+	gH_AdminMenu = TopMenu.FromHandle(topmenu);
 }
 
 void LoadDHooks()
@@ -554,6 +599,10 @@ public void OnLibraryAdded(const char[] name)
 	{
 		gB_Eventqueuefix = true;
 	}
+	else if (StrEqual(name, "adminmenu"))
+	{
+		gB_AdminMenu = true;
+	}
 }
 
 public void OnLibraryRemoved(const char[] name)
@@ -577,6 +626,12 @@ public void OnLibraryRemoved(const char[] name)
 	else if(StrEqual(name, "eventqueuefix"))
 	{
 		gB_Eventqueuefix = false;
+	}
+	else if (StrEqual(name, "adminmenu"))
+	{
+		gB_AdminMenu = false;
+		gH_AdminMenu = null;
+		gH_TimerCommands = INVALID_TOPMENUOBJECT;
 	}
 }
 
@@ -1022,6 +1077,7 @@ public Action Command_DeleteMap(int client, int args)
 			ReplyToCommand(client, "Deleted all rankings for %s.", gS_DeleteMap[client]);
 		}
 
+		Shavit_LogMessage("%L - deleted all map data for `%s`", client, gS_DeleteMap[client]);
 		ReplyToCommand(client, "Finished deleting data for %s.", gS_DeleteMap[client]);
 		gS_DeleteMap[client] = "";
 	}
@@ -1116,6 +1172,7 @@ public Action Command_WipePlayer(int client, int args)
 		Shavit_PrintToChat(client, "Deleting data for SteamID %s[U:1:%u]%s...",
 			gS_ChatStrings.sVariable, gI_WipePlayerID[client], gS_ChatStrings.sText);
 
+		Shavit_LogMessage("%L - wiped [U:1:%u]'s player data", client, gI_WipePlayerID[client]);
 		DeleteUserData(client, gI_WipePlayerID[client]);
 
 		strcopy(gS_Verification[client], 8, "");
@@ -1155,15 +1212,15 @@ public void Trans_DeleteRestOfUserFailed(Database db, DataPack hPack, int numQue
 
 void DeleteRestOfUser(int iSteamID, DataPack hPack)
 {
-	Transaction2 hTransaction = new Transaction2();
+	Transaction trans = new Transaction();
 	char sQuery[256];
 
 	FormatEx(sQuery, 256, "DELETE FROM %splayertimes WHERE auth = %d;", gS_MySQLPrefix, iSteamID);
-	hTransaction.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 	FormatEx(sQuery, 256, "DELETE FROM %susers WHERE auth = %d;", gS_MySQLPrefix, iSteamID);
-	hTransaction.AddQuery2(sQuery);
+	AddQueryLog(trans, sQuery);
 
-	gH_SQL.Execute(hTransaction, Trans_DeleteRestOfUserSuccess, Trans_DeleteRestOfUserFailed, hPack);
+	gH_SQL.Execute(trans, Trans_DeleteRestOfUserSuccess, Trans_DeleteRestOfUserFailed, hPack);
 }
 
 void DeleteUserData(int client, const int iSteamID)
@@ -1177,7 +1234,7 @@ void DeleteUserData(int client, const int iSteamID)
 		"SELECT id, style, track, map FROM %swrs WHERE auth = %d;",
 		gS_MySQLPrefix, iSteamID);
 
-	gH_SQL.Query2(SQL_DeleteUserData_GetRecords_Callback, sQuery, hPack, DBPrio_High);
+	QueryLog(gH_SQL, SQL_DeleteUserData_GetRecords_Callback, sQuery, hPack, DBPrio_High);
 }
 
 public void SQL_DeleteUserData_GetRecords_Callback(Database db, DBResultSet results, const char[] error, DataPack hPack)
@@ -1378,6 +1435,27 @@ void CallOnTrackChanged(int client, int oldtrack, int newtrack)
 		Shavit_StopChatSound();
 		Shavit_PrintToChat(client, "%T", "TrackChangeFromMain", client, gS_ChatStrings.sVariable, gS_ChatStrings.sText, gS_ChatStrings.sVariable, gS_ChatStrings.sText, gS_ChatStrings.sVariable, gS_ChatStrings.sText);
 	}
+}
+
+public any Native_PrintSteamIDOnce(Handle plugin, int numParams)
+{
+	int client = GetNativeCell(1);
+	int steamid = GetNativeCell(2);
+
+	if (gI_LastPrintedSteamID[client] != steamid && GetSteamAccountID(client) != steamid)
+	{
+		gI_LastPrintedSteamID[client] = steamid;
+
+		char targetname[32+1], steam2[40], steam64[40];
+
+		GetNativeString(3, targetname, sizeof(targetname));
+		AccountIDToSteamID2(steamid, steam2, sizeof(steam2));
+		AccountIDToSteamID64(steamid, steam64, sizeof(steam64));
+
+		Shavit_PrintToChat(client, "%s: %s%s %s[U:1:%u]%s %s", targetname, gS_ChatStrings.sVariable, steam2, gS_ChatStrings.sText, steamid, gS_ChatStrings.sVariable, steam64);
+	}
+
+	return 1;
 }
 
 public any Native_UpdateLaggedMovement(Handle handler, int numParams)
@@ -1634,7 +1712,9 @@ public void Player_Death(Event event, const char[] name, bool dontBroadcast)
 
 public int Native_GetDatabase(Handle handler, int numParams)
 {
-	return view_as<int>(CloneHandle(gH_SQL, handler));
+	if (numParams > 0)
+		SetNativeCellRef(1, gI_Driver);
+	return gH_SQL ? view_as<int>(CloneHandle(gH_SQL, handler)) : 0;
 }
 
 public int Native_GetClientTime(Handle handler, int numParams)
@@ -2412,7 +2492,7 @@ void StartTimer(int client, int track)
 
 			gA_Timers[client].iTimerTrack = track;
 			gA_Timers[client].bTimerEnabled = true;
-			gA_Timers[client].iSHSWCombination = -1;
+			gA_Timers[client].iKeyCombo = -1;
 			gA_Timers[client].fCurrentTime = 0.0;
 			gA_Timers[client].bPracticeMode = false;
 			gA_Timers[client].iMeasuredJumps = 0;
@@ -2428,7 +2508,7 @@ void StartTimer(int client, int track)
 			// TODO: Look into when this should be reset (since resetting it here disables timescale while in startzone).
 			//gA_Timers[client].fNextFrameTime = 0.0;
 
-			//gA_Timers[client].fplayer_speedmod = 1.0;
+			gA_Timers[client].fplayer_speedmod = 1.0;
 			UpdateLaggedMovement(client, true);
 
 			SetEntityGravity(client, GetStyleSettingFloat(gA_Timers[client].bsStyle, "gravity"));
@@ -2554,7 +2634,7 @@ public void OnClientPutInServer(int client)
 	gB_Auto[client] = true;
 	gA_Timers[client].fStrafeWarning = 0.0;
 	gA_Timers[client].bPracticeMode = false;
-	gA_Timers[client].iSHSWCombination = -1;
+	gA_Timers[client].iKeyCombo = -1;
 	gA_Timers[client].iTimerTrack = 0;
 	gA_Timers[client].bsStyle = 0;
 	gA_Timers[client].fTimescale = 1.0;
@@ -2567,6 +2647,7 @@ public void OnClientPutInServer(int client)
 	gI_FirstTouchedGround[client] = 0;
 	gI_LastTickcount[client] = 0;
 	gI_HijackFrames[client] = 0;
+	gI_LastPrintedSteamID[client] = 0;
 
 	gB_CookiesRetrieved[client] = false;
 
@@ -2614,10 +2695,16 @@ public void OnClientPutInServer(int client)
 
 	char sQuery[512];
 
-	if(gB_MySQL)
+	if (gI_Driver == Driver_mysql)
 	{
 		FormatEx(sQuery, 512,
 			"INSERT INTO %susers (auth, name, ip, lastlogin) VALUES (%d, '%s', %d, %d) ON DUPLICATE KEY UPDATE name = '%s', ip = %d, lastlogin = %d;",
+			gS_MySQLPrefix, iSteamID, sEscapedName, iIPAddress, iTime, sEscapedName, iIPAddress, iTime);
+	}
+	else if (gI_Driver == Driver_pgsql)
+	{
+		FormatEx(sQuery, 512,
+			"INSERT INTO %susers (auth, name, ip, lastlogin) VALUES (%d, '%s', %d, %d) ON CONFLICT(auth) DO UPDATE SET name = '%s', ip = %d, lastlogin = %d;",
 			gS_MySQLPrefix, iSteamID, sEscapedName, iIPAddress, iTime, sEscapedName, iIPAddress, iTime);
 	}
 	else
@@ -2627,7 +2714,7 @@ public void OnClientPutInServer(int client)
 			gS_MySQLPrefix, iSteamID, sEscapedName, iIPAddress, iTime);
 	}
 
-	gH_SQL.Query2(SQL_InsertUser_Callback, sQuery, GetClientSerial(client));
+	QueryLog(gH_SQL, SQL_InsertUser_Callback, sQuery, GetClientSerial(client));
 }
 
 public void SQL_InsertUser_Callback(Database db, DBResultSet results, const char[] error, any data)
@@ -2728,10 +2815,10 @@ bool LoadMessages()
 void SQL_DBConnect()
 {
 	GetTimerSQLPrefix(gS_MySQLPrefix, 32);
-	gH_SQL = GetTimerDatabaseHandle2();
-	gB_MySQL = IsMySQLDatabase(gH_SQL);
+	gH_SQL = GetTimerDatabaseHandle();
+	gI_Driver = GetDatabaseDriver(gH_SQL);
 
-	SQL_CreateTables(gH_SQL, gS_MySQLPrefix, gB_MySQL);
+	SQL_CreateTables(gH_SQL, gS_MySQLPrefix, gI_Driver);
 }
 
 public void Shavit_OnEnterZone(int client, int type, int track, int id, int entity)
@@ -3248,6 +3335,36 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 				buttons &= ~IN_MOVERIGHT;
 			}
 
+			if (GetStyleSettingBool(gA_Timers[client].bsStyle, "a_or_d_only"))
+			{
+				int iCombination = -1;
+				bool bMoveLeft = ((buttons & IN_MOVELEFT) > 0 && vel[1] < 0.0);
+				bool bMoveRight = ((buttons & IN_MOVERIGHT) > 0 && vel[1] > 0.0);
+
+				if (bMoveLeft)
+				{
+					iCombination = 0;
+				}
+				else if (bMoveRight)
+				{
+					iCombination = 1;
+				}
+
+				if (iCombination != -1)
+				{
+					if (gA_Timers[client].iKeyCombo == -1)
+					{
+						gA_Timers[client].iKeyCombo = iCombination;
+					}
+
+					if (iCombination != gA_Timers[client].iKeyCombo)
+					{
+						vel[1] = 0.0;
+						buttons &= ~(IN_MOVELEFT|IN_MOVERIGHT);
+					}
+				}
+			}
+
 			// HSW
 			// Theory about blocking non-HSW strafes while playing HSW:
 			// Block S and W without A or D.
@@ -3274,18 +3391,18 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 					}
 
 					// int gI_SHSW_FirstCombination[MAXPLAYERS+1]; // 0 - W/A S/D | 1 - W/D S/A
-					if(gA_Timers[client].iSHSWCombination == -1 && iCombination != -1)
+					if(gA_Timers[client].iKeyCombo == -1 && iCombination != -1)
 					{
 						Shavit_PrintToChat(client, "%T", (iCombination == 0)? "SHSWCombination0":"SHSWCombination1", client, gS_ChatStrings.sVariable, gS_ChatStrings.sText);
-						gA_Timers[client].iSHSWCombination = iCombination;
+						gA_Timers[client].iKeyCombo = iCombination;
 					}
 
 					// W/A S/D
-					if((gA_Timers[client].iSHSWCombination == 0 && iCombination != 0) ||
+					if((gA_Timers[client].iKeyCombo == 0 && iCombination != 0) ||
 					// W/D S/A
-						(gA_Timers[client].iSHSWCombination == 1 && iCombination != 1) ||
+						(gA_Timers[client].iKeyCombo == 1 && iCombination != 1) ||
 					// no valid combination & no valid input
-						(gA_Timers[client].iSHSWCombination == -1 && iCombination == -1))
+						(gA_Timers[client].iKeyCombo == -1 && iCombination == -1))
 					{
 						vel[0] = 0.0;
 						vel[1] = 0.0;
