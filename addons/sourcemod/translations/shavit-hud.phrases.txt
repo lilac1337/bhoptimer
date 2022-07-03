@@ -13,8 +13,8 @@
 	}
 	"HudInStartZoneimretardedandafaggot"
 	{
-		"#format"	"{1:d},{2:d},{3:d}"
-		"en"		"In Start Zone\nRank: {1}/{2}\n\n{3}"
+		"#format"	"{1:d},{2:d},{3:d},{4:d}"
+		"en"		"In Start Zone\nPoints: {1}\nRank: {2}/{3}\n\n{4}"
 	}
 	"HudInStartZone"
 	{
@@ -37,8 +37,8 @@
 	}
 	"HudInEndZoneimretardedandafaggot"
 	{
-		"#format"	"{1:d},{2:d},{3:d}"
-		"en"		"In End Zone\nRank: {1}/{2}\n\n{3}"
+		"#format"	"{1:d},{2:d},{3:d},{4:d}"
+		"en"		"In End Zone\nPoints: {1}\nRank: {2}/{3}\n\n{4}"
 	}
 	"HudInEndZoneCSGO"
 	{
