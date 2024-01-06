@@ -24,7 +24,7 @@
 #endif
 #define _shavit_core_included
 
-#define SHAVIT_VERSION "3.3.0"
+#define SHAVIT_VERSION "3.4.2"
 #define STYLE_LIMIT 256
 
 // god i fucking hate sourcemod. NULL_VECTOR isn't const so it's not guaranteed to be 0,0,0
@@ -283,8 +283,8 @@ stock void LessStupidGetMapDisplayName(const char[] map, char[] displayName, int
 	strcopy(temp, sizeof(temp), map);
 	ReplaceString(temp, sizeof(temp), "\\", "/", true);
 
-	int slashpos = FindCharInString(map, '/', true);
-	strcopy(temp2, sizeof(temp2), map[slashpos+1]);
+	int slashpos = FindCharInString(temp, '/', true);
+	strcopy(temp2, sizeof(temp2), temp[slashpos+1]);
 
 	int ugcpos = StrContains(temp2, ".ugc", true);
 
@@ -329,7 +329,7 @@ stock void GetTimerSQLPrefix(char[] buffer, int maxlen)
 
 stock bool IsValidClient(int client, bool bAlive = false)
 {
-	return (client >= 1 && client <= MaxClients && IsClientConnected(client) && IsClientInGame(client) && !IsClientSourceTV(client) && (!bAlive || IsPlayerAlive(client)));
+	return (client >= 1 && client <= MaxClients && IsClientInGame(client) && !IsClientSourceTV(client) && (!bAlive || IsPlayerAlive(client)));
 }
 
 stock bool IsSource2013(EngineVersion ev)
@@ -598,6 +598,15 @@ stock void TrimDisplayString(const char[] str, char[] outstr, int outstrlen, int
 		Format(outstr, outstrlen, "%s...", outstr);
 }
 
+// TODO: surfacefriction
+stock float MaxPrestrafe(float runspeed, float accelerate, float friction, float tickinterval)
+{
+	return runspeed * SquareRoot(
+		(accelerate / friction) *
+		((2.0 - accelerate * tickinterval) / (2.0 - friction * tickinterval))
+	);
+}
+
 /**
  * Called before shavit-core processes the client's usercmd.
  * Before this is called, safety checks (fake/dead clients) happen.
@@ -646,9 +655,10 @@ forward void Shavit_OnTimeIncrementPost(int client, float time);
  *
  * @param client                    Client index.
  * @param track                     Timer track.
+ * @param skipGroundTimer           Whether shavit-core can skip the on-ground-for-half-a-second check. shavit-misc uses this for some prespeed settings...
  * @return                          Plugin_Continue to do nothing or anything else to not start the timer.
  */
-forward Action Shavit_OnStartPre(int client, int track);
+forward Action Shavit_OnStartPre(int client, int track, bool& skipGroundTimer);
 
 /**
  * Called when a player's timer starts.
@@ -839,26 +849,6 @@ forward void Shavit_OnChatConfigLoaded();
 forward void Shavit_OnWorstRecord(int client, int style, float time, int jumps, int strafes, float sync, int track, float oldtime, float perfs, float avgvel, float maxvel, int timestamp);
 
 /**
- * Called before clan tag variables are processed.
- *
- * @param client					Client index.
- * @param clantag					Reference to the clan tag buffer.
- * @param clantaglength				Max length of the customtag buffer.
- * @return							Plugin_Handled or Plugin_Stop to block the clan tag from changing. Anything else to pass along new values.
- */
-forward Action Shavit_OnClanTagChangePre(int client, char[] clantag, int clantaglength);
-
-/**
- * Called after clan tags are changed.
- *
- * @param client					Client index.
- * @param customtag					Reference to the custom clan tag buffer.
- * @param customtaglength			Max length of the customtag buffer.
- * @noreturn
- */
-forward void Shavit_OnClanTagChangePost(int client, char[] customtag, int customtaglength);
-
-/**
  * Called when a time offset is calculated
  *
  * @param client					Client index.
@@ -929,9 +919,10 @@ native Database Shavit_GetDatabase(int& outdriver=0);
  *
  * @param client					Client index.
  * @param track						Timer track.
+ * @param skipGroundCheck           Whether to skip checking if the player is on the ground. This is used in shavit-zones for when teleporting/!restarting players to a floating zone...
  * @noreturn
  */
-native void Shavit_StartTimer(int client, int track);
+native void Shavit_StartTimer(int client, int track, bool skipGroundCheck=false);
 
 /**
  * Restarts the timer for a player.
@@ -1064,7 +1055,7 @@ native void Shavit_ResumeTimer(int client, bool teleport = false);
  * Gets a players zone offset.
  *
  * @param client					Client index.
- * @param teleport					Zone type (Zone_Start or Zone_End).
+ * @param zonetype					Zone type (Zone_Start or Zone_End).
  * @return							Zone offset fraction if any for the given zone type.
  */
 native float Shavit_GetZoneOffset(int client, int zonetype);
@@ -1073,8 +1064,8 @@ native float Shavit_GetZoneOffset(int client, int zonetype);
  * Gets distance of a players distance offset given a zone.
  *
  * @param client					Client index.
- * @param teleport					Zone type  (Zone_Start or Zone_End).
- * @return 							Distance offset if any for the given zone type/
+ * @param zonetype					Zone type  (Zone_Start or Zone_End).
+ * @return 							Distance offset if any for the given zone type
  */
 native float Shavit_GetDistanceOffset(int client, int zonetype);
 
@@ -1376,7 +1367,7 @@ native float Shavit_GetMaxVelocity(int client);
 native void Shavit_SetAvgVelocity(int client, float vel);
 
 /**
- * Gets the max velocity of a player.
+ * Sets the max velocity a player has reached in a run. (timer_snapshot_t.fMaxVelocity)
  *
  * @param client					Client index
  * @param vel						Max velocity
@@ -1472,7 +1463,7 @@ public void __pl_shavit_core_SetNTVOptional()
 	MarkNativeAsOptional("Shavit_CanPause");
 	MarkNativeAsOptional("Shavit_ChangeClientStyle");
 	MarkNativeAsOptional("Shavit_FinishMap");
-	MarkNativeAsOptional("Shavit_FormatChat");
+	MarkNativeAsOptional("Shavit_GetAvgVelocity");
 	MarkNativeAsOptional("Shavit_GetBhopStyle");
 	MarkNativeAsOptional("Shavit_GetChatStrings");
 	MarkNativeAsOptional("Shavit_GetChatStringsStruct");
@@ -1480,6 +1471,7 @@ public void __pl_shavit_core_SetNTVOptional()
 	MarkNativeAsOptional("Shavit_GetClientTime");
 	MarkNativeAsOptional("Shavit_GetClientTrack");
 	MarkNativeAsOptional("Shavit_GetDatabase");
+	MarkNativeAsOptional("Shavit_GetMaxVelocity");
 	MarkNativeAsOptional("Shavit_GetOrderedStyles");
 	MarkNativeAsOptional("Shavit_GetPerfectJumps");
 	MarkNativeAsOptional("Shavit_GetStrafeCount");
@@ -1500,6 +1492,7 @@ public void __pl_shavit_core_SetNTVOptional()
 	MarkNativeAsOptional("Shavit_IsPaused");
 	MarkNativeAsOptional("Shavit_IsPracticeMode");
 	MarkNativeAsOptional("Shavit_LoadSnapshot");
+	MarkNativeAsOptional("Shavit_LogMessage");
 	MarkNativeAsOptional("Shavit_MarkKZMap");
 	MarkNativeAsOptional("Shavit_PauseTimer");
 	MarkNativeAsOptional("Shavit_PrintToChat");
@@ -1507,6 +1500,8 @@ public void __pl_shavit_core_SetNTVOptional()
 	MarkNativeAsOptional("Shavit_RestartTimer");
 	MarkNativeAsOptional("Shavit_ResumeTimer");
 	MarkNativeAsOptional("Shavit_SaveSnapshot");
+	MarkNativeAsOptional("Shavit_SetAvgVelocity");
+	MarkNativeAsOptional("Shavit_SetMaxVelocity");
 	MarkNativeAsOptional("Shavit_SetPracticeMode");
 	MarkNativeAsOptional("Shavit_StartTimer");
 	MarkNativeAsOptional("Shavit_StopChatSound");

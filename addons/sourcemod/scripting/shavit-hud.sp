@@ -452,34 +452,26 @@ public void BotPostThinkPost(int client)
 
 public void OnClientCookiesCached(int client)
 {
-	char sHUDSettings[8];
-	GetClientCookie(client, gH_HUDCookie, sHUDSettings, 8);
+	char sHUDSettings[12];
+	GetClientCookie(client, gH_HUDCookie, sHUDSettings, sizeof(sHUDSettings));
 
 	if(strlen(sHUDSettings) == 0)
 	{
-		gCV_DefaultHUD.GetString(sHUDSettings, 8);
-
+		gCV_DefaultHUD.GetString(sHUDSettings, sizeof(sHUDSettings));
 		SetClientCookie(client, gH_HUDCookie, sHUDSettings);
-		gI_HUDSettings[client] = gCV_DefaultHUD.IntValue;
-	}
-	else
-	{
-		gI_HUDSettings[client] = StringToInt(sHUDSettings);
 	}
 
-	GetClientCookie(client, gH_HUDCookieMain, sHUDSettings, 8);
+	gI_HUDSettings[client] = StringToInt(sHUDSettings);
+
+	GetClientCookie(client, gH_HUDCookieMain, sHUDSettings, sizeof(sHUDSettings));
 
 	if(strlen(sHUDSettings) == 0)
 	{
-		gCV_DefaultHUD2.GetString(sHUDSettings, 8);
-
+		gCV_DefaultHUD2.GetString(sHUDSettings, sizeof(sHUDSettings));
 		SetClientCookie(client, gH_HUDCookieMain, sHUDSettings);
-		gI_HUD2Settings[client] = gCV_DefaultHUD2.IntValue;
 	}
-	else
-	{
-		gI_HUD2Settings[client] = StringToInt(sHUDSettings);
-	}
+
+	gI_HUD2Settings[client] = StringToInt(sHUDSettings);
 
 	if (gEV_Type != Engine_TF2 && IsValidClient(client, true) && GetClientTeam(client) > 1)
 	{
@@ -740,12 +732,9 @@ Action ShowHUDMenu(int client, int item)
 		menu.AddItem(sInfo, sHudItem);
 	}
 
-	if (CheckCommandAccess(client, "shavit_admin", ADMFLAG_BAN))
-	{
-		FormatEx(sInfo, 16, "!%d", HUD_DEBUGTARGETNAME);
-		FormatEx(sHudItem, 64, "%T", "HudDebugTargetname", client);
-		menu.AddItem(sInfo, sHudItem);
-	}
+	FormatEx(sInfo, 16, "!%d", HUD_DEBUGTARGETNAME);
+	FormatEx(sHudItem, 64, "%T", "HudDebugTargetname", client);
+	menu.AddItem(sInfo, sHudItem);
 
 	// HUD2 - disables selected elements
 	FormatEx(sInfo, 16, "@%d", HUD2_TIME);
@@ -1332,13 +1321,13 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 		}
 		else if(data.iZoneHUD == ZoneHUD_Start)
 		{
-			FormatEx(sLine, 128, "%T ", "HudInStartZone", client, data.iSpeed);
+			FormatEx(sLine, 128, "%T ", (gI_HUD2Settings[client] & HUD2_SPEED) ? "HudInStartZoneNoSpeed" : "HudInStartZone", client, data.iSpeed);
 		}
 		else
 		{
-			FormatEx(sLine, 128, "%T ", "HudInEndZone", client, data.iSpeed);
-		} 
-		
+			FormatEx(sLine, 128, "%T ", (gI_HUD2Settings[client] & HUD2_SPEED) ? "HudInEndZoneNoSpeed" : "HudInEndZone", client, data.iSpeed);
+		}
+
 		/*if(!Shavit_GetPoints(client) == 0.0) 
 		{
 			FormatEx(sLine, 128, "Rank: %i/%i", Shavit_GetRank(client), Shavit_GetRankedPlayers());
@@ -1732,7 +1721,7 @@ void UpdateMainHUD(int client)
 
 	if(!bReplay)
 	{
-		if (gB_Zones && Shavit_GetClientTime(client) < 0.05)
+		if (gB_Zones && Shavit_GetClientTime(client) < 0.3)
 		{
 			if (Shavit_InsideZone(target, Zone_Start, huddata.iTrack))
 			{
@@ -1890,7 +1879,7 @@ void UpdateKeyOverlay(int client, Panel panel, bool &draw)
 	float fAngleDiff;
 	int buttons;
 
-	if (IsValidClient(target))
+	if (IsValidClient(target) && !IsFakeClient(target))
 	{
 		fAngleDiff = gF_AngleDiff[target];
 		buttons = gI_Buttons[target];
@@ -1978,8 +1967,16 @@ void UpdateCenterKeys(int client)
 
 	if (IsValidClient(target))
 	{
-		fAngleDiff = gF_AngleDiff[target];
-		buttons = gI_Buttons[target];
+		if (IsFakeClient(target))
+		{
+			buttons = Shavit_GetReplayButtons(target, fAngleDiff);
+		}
+		else
+		{
+			fAngleDiff = gF_AngleDiff[target];
+			buttons = gI_Buttons[target];
+		}
+
 		scrolls = gI_ScrollCount[target];
 		prevscrolls = gI_LastScrollCount[target];
 	}
@@ -2293,7 +2290,7 @@ void UpdateKeyHint(int client)
 
 		if((gI_HUDSettings[client] & HUD_TIMELEFT) > 0 && GetMapTimeLeft(iTimeLeft) && iTimeLeft > 0)
 		{
-			FormatEx(sMessage, 256, (iTimeLeft > 60)? "%T: %d minutes":"%T: %d seconds", "HudTimeLeft", client, (iTimeLeft > 60) ? (iTimeLeft / 60)+1 : iTimeLeft);
+			FormatEx(sMessage, 256, (iTimeLeft > 150)? "%T: %d minutes":"%T: %d seconds", "HudTimeLeft", client, (iTimeLeft > 150) ? (iTimeLeft / 60)+1 : iTimeLeft);
 		}
 
 		int target = GetSpectatorTarget(client, client);

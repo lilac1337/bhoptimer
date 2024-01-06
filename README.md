@@ -2,7 +2,9 @@
 
 ### RECOMPILE ALL YOUR PLUGINS THAT USE `#include <shavit>` OR STUFF WILL BREAK
 
-[AlliedModders thread](https://forums.alliedmods.net/showthread.php?t=265456)
+### CS:GO is dead. Support won't be removed and gamedata should:tm: still work but it isn't actively tested.
+
+[AlliedModders thread](https://forums.alliedmods.net/showthread.php?t=265456) // !!! OUTDATED !!!
 
 [Download](https://github.com/shavitush/bhoptimer/releases)
 
@@ -16,13 +18,14 @@ Includes a records system, map zones (start/end marks etc), bonuses, HUD with us
 
 # Requirements:
 * Steam version of Counter-Strike: Source, Counter-Strike: Global Offensive, or Team Fortress 2.
-* [Metamod:Source](https://www.sourcemm.net/downloads.php?branch=stable) and [SourceMod 1.10 or above](https://www.sourcemod.net/downloads.php?branch=stable) installed.
+* [Metamod:Source](https://www.sourcemm.net/downloads.php?branch=stable) and [SourceMod](https://www.sourcemod.net/downloads.php?branch=stable) 1.10 or higher ([1.10](https://www.sourcemod.net/downloads.php?branch=1.10-dev&all=1), [1.11](https://www.sourcemod.net/downloads.php?branch=1.11-dev&all=1), [1.12](https://www.sourcemod.net/downloads.php?branch=1.12-dev&all=1)).
 * A MySQL database (preferably locally hosted) if your database is likely to grow big, or if you want to use the rankings plugin. MySQL server version of 5.5.5 or above (MariaDB equivalent works too) is required.
-* [DHooks](https://github.com/peace-maker/DHooks2/releases)
+* [DHooks](https://github.com/peace-maker/DHooks2/releases) (included with SourceMod 1.11 and higher).
 
 # Optional requirements, for the best experience:
 * [eventqueuefix](https://github.com/hermansimensen/eventqueue-fix)
   * Allows for timescaling boosters and is used to fix some exploits. (Use this instead of `boosterfix`)
+  * (included in bhoptimer release zips)
 * [SteamWorks](https://forums.alliedmods.net/showthread.php?t=229556)
   * Used to grab `{serverip}` in advertisements.
 * [DynamicChannels](https://github.com/Vauff/DynamicChannels)
@@ -271,6 +274,8 @@ Player commands:
   - Allows players to toggle trigger visibility.
 * [ShowPlayerClips](https://forums.alliedmods.net/showthread.php?p=2661942) ([github](https://github.com/GAMMACASE/ShowPlayerClips))
   - Allows players to toggle player clip visibility.
+* [JumpStats](https://github.com/Nimmy2222/bhop-get-stats)
+  - Covers SSJ, Jhud, StrafeTrainer, Strafe Offsets and FJT. Colors, HUD positioning editor, cookies, etc
 * [shavit-ssj](https://github.com/Nairdaa/shavit-ssj)
   - Speed of Sixth Jump + more, customisable settings with cookies remembering user prefered settings.
 * [shavit-jhud](https://github.com/blankbhop/jhud)

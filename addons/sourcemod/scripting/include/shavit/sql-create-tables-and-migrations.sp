@@ -1,6 +1,6 @@
 /*
  * shavit's Timer - SQL table creation and migrations
- * by: shavit, rtldg
+ * by: shavit, rtldg, jedso
  *
  * This file is part of shavit's Timer (https://github.com/shavitush/bhoptimer)
  *
@@ -50,15 +50,52 @@ enum
 	Migration_NormalizeMapzonePoints,
 	Migration_AddMapzonesForm, // 25
 	Migration_AddMapzonesTarget,
+	Migration_DeprecateExactTimeInt,
+	Migration_AddPlayertimesAuthFK,
+	Migration_FixSQLiteMapzonesROWID,
 	MIGRATIONS_END
+};
+
+char gS_MigrationNames[][] = {
+	"RemoveWorkshopMaptiers",
+	"RemoveWorkshopMapzones",
+	"RemoveWorkshopPlayertimes",
+	"LastLoginIndex",
+	"RemoveCountry",
+	"ConvertIPAddresses",
+	"ConvertSteamIDsUsers",
+	"ConvertSteamIDsPlayertimes",
+	"ConvertSteamIDsChat",
+	"PlayertimesDateToInt",
+	"AddZonesFlagsAndData",
+	"AddPlayertimesCompletions",
+	"AddCustomChatAccess",
+	"AddPlayertimesExactTimeInt",
+	"FixOldCompletionCounts",
+	"AddPrebuiltToMapZonesTable",
+	"AddPlaytime",
+	"Lowercase_maptiers",
+	"Lowercase_mapzones",
+	"Lowercase_playertimes",
+	"Lowercase_stagetimeswr",
+	"Lowercase_startpositions",
+	"AddPlayertimesPointsCalcedFrom",
+	"RemovePlayertimesPointsCalcedFrom",
+	"NormalizeMapzonePoints",
+	"AddMapzonesForm",
+	"AddMapzonesTarget",
+	"DeprecateExactTimeInt",
+	"AddPlayertimesAuthFK",
+	"FixSQLiteMapzonesROWID",
 };
 
 static Database gH_SQL;
 static int gI_Driver;
 static char gS_SQLPrefix[32];
 
-int gI_MigrationsRequired;
-int gI_MigrationsFinished;
+bool gB_MigrationsApplied[255];
+char SQLitePTQuery[1024]; // used in Migration_AddPlayertimesAuthFK if db created <= v3.3.2
+char SQLiteMapzonesQuery[1024]; // used in Migration_FixSQLiteMapzonesROWID if db created <= v3.3.2
 
 public void RunOnDatabaseLoadedForward()
 {
@@ -157,15 +194,16 @@ public void SQL_CreateTables(Database hSQL, const char[] prefix, int driver)
 	if (driver == Driver_mysql)
 	{
 		FormatEx(sQuery, sizeof(sQuery),
-			"CREATE TABLE IF NOT EXISTS `%splayertimes` (`id` INT NOT NULL AUTO_INCREMENT, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `time` FLOAT NOT NULL, `auth` INT NOT NULL, `map` VARCHAR(255) NOT NULL, `points` FLOAT NOT NULL DEFAULT 0, `exact_time_int` INT DEFAULT 0, `jumps` INT, `date` INT, `strafes` INT, `sync` FLOAT, `perfs` FLOAT DEFAULT 0, `completions` SMALLINT DEFAULT 1, PRIMARY KEY (`id`), INDEX `map` (`map`, `style`, `track`, `time`), INDEX `auth` (`auth`, `date`, `points`), INDEX `time` (`time`), INDEX `map2` (`map`)) ENGINE=INNODB;",
-			gS_SQLPrefix);
+			"CREATE TABLE IF NOT EXISTS `%splayertimes` (`id` INT NOT NULL AUTO_INCREMENT, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `time` FLOAT NOT NULL, `auth` INT NOT NULL, `map` VARCHAR(255) NOT NULL, `points` FLOAT NOT NULL DEFAULT 0, `jumps` INT, `date` INT, `strafes` INT, `sync` FLOAT, `perfs` FLOAT DEFAULT 0, `completions` SMALLINT DEFAULT 1, PRIMARY KEY (`id`), INDEX `map` (`map`, `style`, `track`, `time`), INDEX `auth` (`auth`, `date`, `points`), INDEX `time` (`time`), INDEX `map2` (`map`), CONSTRAINT `%spt_auth` FOREIGN KEY (`auth`) REFERENCES `%susers` (`auth`) ON UPDATE RESTRICT ON DELETE RESTRICT) ENGINE=INNODB;",
+			gS_SQLPrefix, gS_SQLPrefix, gS_SQLPrefix);
 	}
 	else
 	{
 		// id  style  track  time  auth  map  points  exact_time_int
 		FormatEx(sQuery, sizeof(sQuery),
-			"CREATE TABLE IF NOT EXISTS `%splayertimes` (`id` INTEGER PRIMARY KEY, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `time` FLOAT NOT NULL, `auth` INT NOT NULL, `map` VARCHAR(255) NOT NULL, `points` FLOAT NOT NULL DEFAULT 0, `exact_time_int` INT DEFAULT 0, `jumps` INT, `date` INT, `strafes` INT, `sync` FLOAT, `perfs` FLOAT DEFAULT 0, `completions` SMALLINT DEFAULT 1);",
-			gS_SQLPrefix);
+			"CREATE TABLE IF NOT EXISTS `%splayertimes` (`id` INTEGER PRIMARY KEY, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `time` FLOAT NOT NULL, `auth` INT NOT NULL, `map` VARCHAR(255) NOT NULL, `points` FLOAT NOT NULL DEFAULT 0, `jumps` INT, `date` INT, `strafes` INT, `sync` FLOAT, `perfs` FLOAT DEFAULT 0, `completions` SMALLINT DEFAULT 1, CONSTRAINT `%spt_auth` FOREIGN KEY (`auth`) REFERENCES `%susers` (`auth`) ON UPDATE RESTRICT ON DELETE RESTRICT);",
+			gS_SQLPrefix, gS_SQLPrefix, gS_SQLPrefix);
+		strcopy(SQLitePTQuery, sizeof(SQLitePTQuery), sQuery);
 	}
 
 	AddQueryLog(trans, sQuery);
@@ -204,10 +242,21 @@ public void SQL_CreateTables(Database hSQL, const char[] prefix, int driver)
 	//// shavit-wr
 	//
 
-	FormatEx(sQuery, sizeof(sQuery),
-		"CREATE TABLE IF NOT EXISTS `%smapzones` (`id` INT AUTO_INCREMENT, `map` VARCHAR(255) NOT NULL, `type` INT, `corner1_x` FLOAT, `corner1_y` FLOAT, `corner1_z` FLOAT, `corner2_x` FLOAT, `corner2_y` FLOAT, `corner2_z` FLOAT, `destination_x` FLOAT NOT NULL DEFAULT 0, `destination_y` FLOAT NOT NULL DEFAULT 0, `destination_z` FLOAT NOT NULL DEFAULT 0, `track` INT NOT NULL DEFAULT 0, `flags` INT NOT NULL DEFAULT 0, `data` INT NOT NULL DEFAULT 0, `form` TINYINT, `target` VARCHAR(63), PRIMARY KEY (`id`)) %s;",
-		gS_SQLPrefix, sOptionalINNODB);
-	AddQueryLog(trans, sQuery);
+	if (driver == Driver_mysql)
+	{
+		FormatEx(sQuery, sizeof(sQuery),
+			"CREATE TABLE IF NOT EXISTS `%smapzones` (`id` INT AUTO_INCREMENT, `map` VARCHAR(255) NOT NULL, `type` INT, `corner1_x` FLOAT, `corner1_y` FLOAT, `corner1_z` FLOAT, `corner2_x` FLOAT, `corner2_y` FLOAT, `corner2_z` FLOAT, `destination_x` FLOAT NOT NULL DEFAULT 0, `destination_y` FLOAT NOT NULL DEFAULT 0, `destination_z` FLOAT NOT NULL DEFAULT 0, `track` INT NOT NULL DEFAULT 0, `flags` INT NOT NULL DEFAULT 0, `data` INT NOT NULL DEFAULT 0, `form` TINYINT, `target` VARCHAR(63), PRIMARY KEY (`id`)) %s;",
+			gS_SQLPrefix, sOptionalINNODB);
+		AddQueryLog(trans, sQuery);
+	}
+	else
+	{
+		FormatEx(sQuery, sizeof(sQuery),
+			"CREATE TABLE IF NOT EXISTS `%smapzones` (`id` INTEGER PRIMARY KEY, `map` VARCHAR(255) NOT NULL, `type` INT, `corner1_x` FLOAT, `corner1_y` FLOAT, `corner1_z` FLOAT, `corner2_x` FLOAT, `corner2_y` FLOAT, `corner2_z` FLOAT, `destination_x` FLOAT NOT NULL DEFAULT 0, `destination_y` FLOAT NOT NULL DEFAULT 0, `destination_z` FLOAT NOT NULL DEFAULT 0, `track` INT NOT NULL DEFAULT 0, `flags` INT NOT NULL DEFAULT 0, `data` INT NOT NULL DEFAULT 0, `form` TINYINT, `target` VARCHAR(63));",
+			gS_SQLPrefix);
+		AddQueryLog(trans, sQuery);
+		strcopy(SQLiteMapzonesQuery, sizeof(SQLiteMapzonesQuery), sQuery);
+	}
 
 	FormatEx(sQuery, sizeof(sQuery),
 		"CREATE TABLE IF NOT EXISTS `%sstartpositions` (`auth` INTEGER NOT NULL, `track` TINYINT NOT NULL, `map` VARCHAR(255) NOT NULL, `pos_x` FLOAT, `pos_y` FLOAT, `pos_z` FLOAT, `ang_x` FLOAT, `ang_y` FLOAT, `ang_z` FLOAT, `angles_only` BOOL, PRIMARY KEY (`auth`, `track`, `map`)) %s;",
@@ -268,20 +317,25 @@ public void SQL_SelectMigrations_Callback(Database db, DBResultSet results, cons
 		bMigrationApplied[results.FetchInt(0)] = true;
 	}
 
+	gB_MigrationsApplied = bMigrationApplied;
+	DoNextMigration();
+}
+
+void DoNextMigration()
+{
 	for (int i = 0; i < MIGRATIONS_END; i++)
 	{
-		if (!bMigrationApplied[i])
+		if (!gB_MigrationsApplied[i])
 		{
-			gI_MigrationsRequired++;
-			PrintToServer("--- Applying database migration %d ---", i);
+			gB_MigrationsApplied[i] = true;
+			PrintToServer("--- Applying database migration %d %s ---", i, gS_MigrationNames[i]);
+			PrintToChatAll("--- Applying database migration %d %s ---", i, gS_MigrationNames[i]);
 			ApplyMigration(i);
+			return;
 		}
 	}
 
-	if (!gI_MigrationsRequired)
-	{
-		RunOnDatabaseLoadedForward();
-	}
+	RunOnDatabaseLoadedForward();
 }
 
 void ApplyMigration(int migration)
@@ -312,6 +366,9 @@ void ApplyMigration(int migration)
 		case Migration_NormalizeMapzonePoints: ApplyMigration_NormalizeMapzonePoints();
 		case Migration_AddMapzonesForm: ApplyMigration_AddMapzonesForm();
 		case Migration_AddMapzonesTarget: ApplyMigration_AddMapzonesTarget();
+		case Migration_DeprecateExactTimeInt: ApplyMigration_DeprecateExactTimeInt();
+		case Migration_AddPlayertimesAuthFK: ApplyMigration_AddPlayertimesAuthFK();
+		case Migration_FixSQLiteMapzonesROWID: ApplyMigration_FixSQLiteMapzonesROWID();
 	}
 }
 
@@ -359,9 +416,13 @@ void ApplyMigration_AddCustomChatAccess()
 
 void ApplyMigration_AddPlayertimesExactTimeInt()
 {
+#if 0
 	char sQuery[192];
 	FormatEx(sQuery, 192, "ALTER TABLE `%splayertimes` ADD COLUMN `exact_time_int` INT NOT NULL DEFAULT 0 %s;", gS_SQLPrefix, (gI_Driver == Driver_mysql) ? "AFTER `completions`" : "");
 	QueryLog(gH_SQL, SQL_TableMigrationSingleQuery_Callback, sQuery, Migration_AddPlayertimesExactTimeInt, DBPrio_High);
+#else
+	SQL_TableMigrationSingleQuery_Callback(null, null, "", Migration_AddPlayertimesExactTimeInt);
+#endif
 }
 
 void ApplyMigration_FixOldCompletionCounts()
@@ -461,6 +522,166 @@ void ApplyMigration_AddMapzonesTarget()
 	QueryLog(gH_SQL, SQL_TableMigrationSingleQuery_Callback, sQuery, Migration_AddMapzonesTarget, DBPrio_High);
 }
 
+void ApplyMigration_DeprecateExactTimeInt()
+{
+	char query[256];
+
+	if (gI_Driver == Driver_mysql)
+	{
+		// From these:
+		// https://stackoverflow.com/questions/67653555/mysql-function-hexadecimal-conversation-to-float/67654768#67654768
+		// https://stackoverflow.com/questions/37523874/converting-hex-to-float-sql/37524172#37524172
+		// http://multikoder.blogspot.com/2013/03/converting-varbinary-to-float-in-t-sql.html
+		// etc...
+		FormatEx(query, sizeof(query), "UPDATE %splayertimes SET time = (1.0 + (exact_time_int & 0x7FFFFF) * pow(2.0, -23)) * POWER(2.0, (exact_time_int & 0x7f800000) / 0x800000 - 127) WHERE exact_time_int != 0;", gS_SQLPrefix);
+	}
+	else
+	{
+		// sqlite (at least in sourcemod builds) doesn't have the `POWER()` function so we'll just keep doing this transaction batching...
+		FormatEx(query, sizeof(query), "SELECT id, exact_time_int FROM %splayertimes WHERE exact_time_int != 0;", gS_SQLPrefix);
+	}
+
+	QueryLog(gH_SQL, SQL_Migration_DeprecateExactTimeInt_Query, query);
+}
+
+public void SQL_Migration_DeprecateExactTimeInt_Query(Database db, DBResultSet results, const char[] error, any data)
+{
+	if (results == null || results.RowCount == 0)
+	{
+		// mysql should hit this because rowcount should be 0
+		InsertMigration(Migration_DeprecateExactTimeInt);
+		return;
+	}
+
+	ArrayStack stack = new ArrayStack(2);
+
+	while (results.FetchRow())
+	{
+		int things[2];
+		things[0] = results.FetchInt(0);
+		things[1] = results.FetchInt(1);
+		stack.PushArray(things);
+	}
+
+	PrintToServer("--- DeprecateExactTimeInt to edit %d rows ---", results.RowCount);
+	PrintToChatAll("--- DeprecateExactTimeInt to edit %d rows ---", results.RowCount);
+
+	SQL_Migration_DeprecateExactTimeInt_Main(stack);
+}
+
+void SQL_Migration_DeprecateExactTimeInt_Main(ArrayStack stack)
+{
+	Transaction trans = new Transaction();
+	int queries = 0;
+
+	while (!stack.Empty)
+	{
+		int things[2];
+		stack.PopArray(things);
+		char query[512];
+		FormatEx(query, sizeof(query),
+			"UPDATE %splayertimes SET time = %.9f WHERE id = %d;",
+			gS_SQLPrefix, things[1], things[0]);
+		AddQueryLog(trans, query);
+
+		if (++queries > 200)
+			break;
+	}
+
+	PrintToServer("--- DeprecateExactTimeInt starting transaction with %d rows (%f) ---", queries, GetEngineTime());
+	PrintToChatAll("--- DeprecateExactTimeInt starting transaction with %d rows (%f) ---", queries, GetEngineTime());
+
+	if (stack.Empty)
+		delete stack;
+
+	gH_SQL.Execute(trans, Trans_DeprecateExactTimeIntSuccess, Trans_DeprecateExactTimeIntFailed, stack);
+}
+
+public void Trans_DeprecateExactTimeIntSuccess(Database db, ArrayStack stack, int numQueries, DBResultSet[] results, any[] queryData)
+{
+	PrintToServer("--- DeprecateExactTimeInt did transaction with %d rows (%f) ---", numQueries, GetEngineTime());
+	PrintToChatAll("--- DeprecateExactTimeInt did transaction with %d rows (%f) ---", numQueries, GetEngineTime());
+
+	if (!stack)
+	{
+		InsertMigration(Migration_DeprecateExactTimeInt);
+		return;
+	}
+
+	SQL_Migration_DeprecateExactTimeInt_Main(stack);
+}
+
+public void Trans_DeprecateExactTimeIntFailed(Database db, ArrayStack stack, int numQueries, const char[] error, int failIndex, any[] queryData)
+{
+	delete stack;
+	LogError("Timer (core) error! ExactTimeInt migration failed. %d %d Reason: %s", numQueries, failIndex, error);
+}
+
+void ApplyMigration_FixSQLiteMapzonesROWID()
+{
+	if (gI_Driver != Driver_sqlite)
+	{
+		InsertMigration(Migration_FixSQLiteMapzonesROWID);
+		return;
+	}
+
+	char sQuery[256];
+	FormatEx(sQuery, sizeof(sQuery), "SELECT sql FROM sqlite_master WHERE name = '%smapzones';", gS_SQLPrefix);
+
+	QueryLog(gH_SQL, SQL_FixSQLiteMapzonesROWID_Callback, sQuery, 0, DBPrio_High);
+}
+
+public void SQL_FixSQLiteMapzonesROWID_Callback(Database db, DBResultSet results, const char[] error, any data)
+{
+	if (results == null)
+	{
+		LogError("Timer error! SQLiteMapzonesROWID migration failed. Reason: %s", error);
+		return;
+	}
+
+	Transaction trans = new Transaction();
+	char sQuery[512];
+	char sMapzonesMasterSQL[1024];
+
+	results.FetchRow();
+	results.FetchString(0, sMapzonesMasterSQL, sizeof(sMapzonesMasterSQL));
+
+	if (StrContains(sMapzonesMasterSQL, "`id` INT AUTO_INCREMENT") != -1)
+	{
+		FormatEx(sQuery, sizeof(sQuery), "CREATE TEMPORARY TABLE temp_mapzones AS SELECT * FROM `%smapzones`;", gS_SQLPrefix);
+		AddQueryLog(trans, sQuery);
+
+		FormatEx(sQuery, sizeof(sQuery), "DROP TABLE `%smapzones`;", gS_SQLPrefix);
+		AddQueryLog(trans, sQuery);
+
+		// Re-use mapzones table creation query
+		AddQueryLog(trans, SQLiteMapzonesQuery);
+
+		// Can't do SELECT * FROM temp_mapzones because DBs created < v3.3.0 have an extra `prebuilt` column
+		FormatEx(sQuery, sizeof(sQuery), "INSERT INTO `%smapzones` SELECT `id`, `map`, `type`, `corner1_x`, `corner1_y`, `corner1_z`, `corner2_x`, `corner2_y`, `corner2_z`, `destination_x`, `destination_y`, `destination_z`, `track`, `flags`, `data`, `form`, `target` FROM temp_mapzones;", gS_SQLPrefix);
+		AddQueryLog(trans, sQuery);
+
+		FormatEx(sQuery, sizeof(sQuery), "DROP TABLE `temp_mapzones`;");
+		AddQueryLog(trans, sQuery);
+
+		gH_SQL.Execute(trans, Trans_FixSQLiteMapzonesROWID_Success, Trans_FixSQLiteMapzonesROWID_Error, 0, DBPrio_High);
+	}
+	else
+	{
+		InsertMigration(Migration_FixSQLiteMapzonesROWID);
+	}
+}
+
+public void Trans_FixSQLiteMapzonesROWID_Success(Database db, any data, int numQueries, DBResultSet[] results, any[] queryData)
+{
+	InsertMigration(Migration_FixSQLiteMapzonesROWID);
+}
+
+public void Trans_FixSQLiteMapzonesROWID_Error(Database db, any data, int numQueries, const char[] error, int failIndex, any[] queryData)
+{
+	LogError("Timer error! SQLiteMapzonesROWID migration transaction failed. Reason: %s", error);
+}
+
 public void SQL_TableMigrationSingleQuery_Callback(Database db, DBResultSet results, const char[] error, any data)
 {
 	InsertMigration(data);
@@ -494,6 +715,120 @@ public void SQL_TableMigrationSingleQuery_Callback(Database db, DBResultSet resu
 		QueryLog(gH_SQL, SQL_TableMigrationIndexing_Callback, sQuery);
 #endif
 	}
+}
+
+void ApplyMigration_AddPlayertimesAuthFK()
+{
+	// More details about this migration here https://github.com/shavitush/bhoptimer/issues/1175
+	char sQuery[512];
+
+	if (gI_Driver == Driver_mysql)
+	{
+		FormatEx(sQuery, sizeof(sQuery),
+			"SELECT COUNT(*) \
+			FROM information_schema.REFERENTIAL_CONSTRAINTS \
+			WHERE CONSTRAINT_SCHEMA = DATABASE() \
+				AND REFERENCED_TABLE_NAME = '%susers' \
+				AND CONSTRAINT_NAME = '%spt_auth';",
+			gS_SQLPrefix, gS_SQLPrefix
+		);
+	}
+	else if (gI_Driver == Driver_sqlite)
+	{
+		FormatEx(sQuery, sizeof(sQuery), "SELECT sql FROM sqlite_master WHERE name = '%splayertimes';", gS_SQLPrefix);
+	}
+	else // PostgreSQL unaffected
+	{
+		InsertMigration(Migration_AddPlayertimesAuthFK);
+		return;
+	}
+
+	QueryLog(gH_SQL, SQL_TableMigrationPlayertimesAuthFK_Callback, sQuery);
+}
+
+public void SQL_TableMigrationPlayertimesAuthFK_Callback(Database db, DBResultSet results, const char[] error, DataPack data)
+{
+	if (results == null)
+	{
+		LogError("Timer error! Playertimes auth FK migration selection failed. Reason: %s", error);
+		return;
+	}
+
+	Transaction trans = new Transaction();
+	char sQuery[512];
+
+	results.FetchRow();
+
+	if (gI_Driver == Driver_mysql)
+	{
+		if (results.FetchInt(0)) // pt_auth CONSTRAINT exists
+		{
+			// Remove in case it has CASCADE referential actions (<= v3.0.8)
+			FormatEx(sQuery, sizeof(sQuery), "ALTER TABLE `%splayertimes` DROP FOREIGN KEY `%spt_auth`;", gS_SQLPrefix, gS_SQLPrefix);
+			AddQueryLog(trans, sQuery);
+		}
+
+		// add missing users to users table
+		FormatEx(sQuery, sizeof(sQuery),
+			"INSERT INTO `%susers` (auth) SELECT p1.auth FROM `%splayertimes` p1 LEFT JOIN `%susers` u1 ON u1.auth = p1.auth WHERE u1.auth IS NULL;",
+			gS_SQLPrefix, gS_SQLPrefix, gS_SQLPrefix
+		);
+		AddQueryLog(trans, sQuery);
+
+		FormatEx(sQuery, sizeof(sQuery), "ALTER TABLE `%splayertimes` ADD CONSTRAINT `%spt_auth` FOREIGN KEY (`auth`) REFERENCES `%susers` (`auth`) ON UPDATE RESTRICT ON DELETE RESTRICT;", gS_SQLPrefix, gS_SQLPrefix, gS_SQLPrefix);
+		AddQueryLog(trans, sQuery);
+	}
+	else
+	{
+		char sPlayertimesMasterSQL[1024];
+		results.FetchString(0, sPlayertimesMasterSQL, sizeof(sPlayertimesMasterSQL));
+
+		char sConstraintTest[64];
+		FormatEx(sConstraintTest, sizeof(sConstraintTest), "CONSTRAINT `%spt_auth`", gS_SQLPrefix);
+
+		if (StrContains(sPlayertimesMasterSQL, sConstraintTest) == -1 // >= v3.1.0
+			|| StrContains(sPlayertimesMasterSQL, "(`auth`) ON UPDATE CASCADE ON DELETE CASCADE") != -1) // <= v3.0.8
+		{
+			// add missing users to users table
+			FormatEx(sQuery, sizeof(sQuery),
+				"INSERT INTO `%susers` (auth) SELECT p1.auth FROM `%splayertimes` p1 LEFT JOIN `%susers` u1 ON u1.auth = p1.auth WHERE u1.auth IS NULL;",
+				gS_SQLPrefix, gS_SQLPrefix, gS_SQLPrefix
+			);
+			AddQueryLog(trans, sQuery);
+
+			FormatEx(sQuery, sizeof(sQuery), "CREATE TEMPORARY TABLE temp_pt AS SELECT * FROM `%splayertimes`;", gS_SQLPrefix);
+			AddQueryLog(trans, sQuery);
+
+			FormatEx(sQuery, sizeof(sQuery), "DROP TABLE `%splayertimes`;", gS_SQLPrefix);
+			AddQueryLog(trans, sQuery);
+
+			// Re-use playertimes table creation query
+			AddQueryLog(trans, SQLitePTQuery);
+
+			FormatEx(sQuery, sizeof(sQuery), "INSERT INTO `%splayertimes` (id, style, track, time, auth, map, points, jumps, date, strafes, sync, perfs, completions) SELECT id, style, track, time, auth, map, points, jumps, date, strafes, sync, perfs, completions FROM temp_pt;", gS_SQLPrefix);
+			AddQueryLog(trans, sQuery);
+
+			FormatEx(sQuery, sizeof(sQuery), "DROP TABLE `temp_pt`;");
+			AddQueryLog(trans, sQuery);
+		}
+		else // db was created > v3.3.2
+		{
+			InsertMigration(Migration_AddPlayertimesAuthFK);
+			return;
+		}
+	}
+
+	gH_SQL.Execute(trans, Trans_AddPlayertimesAuthFK_Success, Trans_AddPlayertimesAuthFK_Error, 0, DBPrio_High);
+}
+
+public void Trans_AddPlayertimesAuthFK_Success(Database db, any data, int numQueries, DBResultSet[] results, any[] queryData)
+{
+	InsertMigration(Migration_AddPlayertimesAuthFK);
+}
+
+public void Trans_AddPlayertimesAuthFK_Error(Database db, any data, int numQueries, const char[] error, int failIndex, any[] queryData)
+{
+	LogError("Timer error! Playertimes auth FK migration transaction failed. Reason: %s", error);
 }
 
 void ApplyMigration_ConvertIPAddresses(bool index = true)
@@ -674,11 +1009,9 @@ void InsertMigration(int migration)
 	QueryLog(gH_SQL, SQL_MigrationApplied_Callback, sQuery, migration);
 }
 
-public void SQL_MigrationApplied_Callback(Database db, DBResultSet results, const char[] error, any data)
+public void SQL_MigrationApplied_Callback(Database db, DBResultSet results, const char[] error, any migration)
 {
-	if (++gI_MigrationsFinished >= gI_MigrationsRequired)
-	{
-		gI_MigrationsRequired = gI_MigrationsFinished = 0;
-		RunOnDatabaseLoadedForward();
-	}
+	PrintToServer("--- FINISHED database migration %d %s ---", migration, gS_MigrationNames[migration]);
+	PrintToChatAll("--- FINISHED database migration %d %s ---", migration, gS_MigrationNames[migration]);
+	DoNextMigration();
 }

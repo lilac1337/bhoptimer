@@ -44,6 +44,14 @@
 
 	"csgo"
 	{
+		"Addresses"
+		{
+			"m_surfaceFriction"
+			{
+				"signature" "CBasePlayer->m_surfaceFriction"
+				"read"      "4" // skip the first 4 bytes
+			}
+		}
 		"Offsets"
 		{
 			// search string: "func_pushable" and you can find CBaseTrigger::PassesTriggerFilters / CBaseVPhysicsTrigger::PassesTriggerFilters. Follow references to these functions to find the vtable and then calculate the offset...
@@ -106,39 +114,63 @@
 			"Player::DoAnimationEvent"
 			{
 				"windows"   "\x55\x8B\xEC\x56\x8B\xF1\x57\x80\xBE\x2A\x2A\x2A\x2A\x00\x74\x2A\x51"
-				"linux"     "\x55\x89\xE5\x83\xEC\x28\x89\x5D\xF4\x8B\x5D\x08\x89\x75\xF8\x8B\x75\x0C\x89\x7D\xFC\x8B\x7D\x10\x80\xBB\x44\x23\x00\x00\x00"
+				"linux"     "\x55\x89\xE5\x57\x56\x53\x83\xEC\x0C\x8B\x5D\x2A\x8B\x75\x2A\x8B\x7D\x2A\x80\xBB\x2A\x2A\x2A\x2A\x00\x75"
 			}
-			// search string: "-nobots"
+			// search string: "-nobots". On Linux this leads to `AreBotsAllowed()`, which can check the references to find MaintainBotQuota
 			"BotManager::MaintainBotQuota"
 			{
-				"windows"   "\x55\x8B\xEC\x83\xEC\x18\x89\x4D\x2A\xFF\x15"
-				"linux"     "\x55\x89\xE5\x83\xEC\x78\x89\x7D\x2A\x8B\x7D\x2A\x89\x5D\x2A\x89\x75\x2A"
+				"windows"   "\x55\x8B\xEC\x83\xEC\x14\x89\x4D\x2A\xFF\x15"
+				"linux"     "\x55\x89\xE5\x57\x56\x53\x83\xEC\x2C\xE8\x2A\x2A\x2A\x2A\x84\xC0\x74\x2A\xA1"
 			}
 			// search string: "Error - no profile for '%s' exists."
 			"CCSBotManager::BotAddCommand"
 			{
 				"windows"   "\x55\x8B\xEC\xA1\x2A\x2A\x2A\x2A\x53\x56\x57\x80\x78\x2A\x00"
-				"linux"     "\x55\x89\xE5\x57\x56\x53\x83\xEC\x4C\x8B\x15\x2A\x2A\x2A\x2A\x8B\x7D\x2A\x8B\x75\x2A\x0F\xB6\x5D\x2A"
+				"linux"     "\x55\x89\xE5\x57\x56\x53\x83\xEC\x1C\x8B\x45\x2A\x89\x45\x2A\xA1\x2A\x2A\x2A\x2A\x0F\xB6\x70"
 			}
 			// search string: "remove 0x%p: %s-%s" to find PhysicsRemoveToucher.
 			// Find PhysicsCheckForEntityUntouch by checking the functions that call PhysicsRemoveToucher.
+			// This sucks to find.
 			"PhysicsCheckForEntityUntouch"
 			{
 				"windows"   "\x55\x8B\xEC\x83\xEC\x08\x56\x8B\xF1\x8B\x86\xD0\x00\x00\x00"
-				"linux"     "\x55\x89\xE5\x57\x56\x53\x83\xEC\x2C\x8B\x5D\x08\xC7\x44\x24\x04\x01\x00\x00\x00\x89\x1C\x24"
+				"linux"     "\x55\x89\xE5\x57\x56\x53\x83\xEC\x24\x8B\x75\x2A\x6A\x01\x56"
 			}
 			// search string: "remove 0x%p: %s-%s (%d-%d) [%d in play, %d max]\n".
 			// function with one argument is PhysicsRemoveTouchedList
+			// Also, this function is referenced (at least on linux) by `CPhysicsPropRespawnable::Event_Killed()` (which includes the string "PROP_CLEARFLAGS"
 			"PhysicsRemoveTouchedList"
 			{
 				"windows"   "\x55\x8B\xEC\x83\xEC\x0C\x57\x8B\xF9\x8B\x87\x2A\x2A\x2A\x2A\xD1\xE8\xA8\x01\x0F\x84"
-				"linux"     "\x55\x89\xE5\x57\x56\x53\x83\xEC\x5C\x8B\x55\x08\xC7\x44\x24\x2A\x2A\x2A\x2A\x2A\x89\x14\x24\xE8"
+				"linux"     "\x55\x89\xE5\x57\x56\x53\x83\xEC\x34\x6A\x01\xFF\x75\x2A\xE8\x2A\x2A\x2A\x2A\x83\xC4\x10"
+			}
+			// search string: "sv_friction", look for instruction like this: "mov some_register, offset sv_friction_cvar"
+			// xref sv_friction_cvar, look for the place that it gets called and has this:
+			// *(float*)(a1[1] + some_offset) * (float(__thiscall)(void*))(*(uintptr_t*)sv_friction + GetFloatIndex*sizeof(void*))(sv_friction)
+			// make a signature for some_offset
+			// if it's unclear: https://youtu.be/xiNQ00X4R_I
+			//  On Ghidra + Windows CSGO, the references are sometimes missing.
+			//  You can find a variable/memory-location holding -25.0 with a memory search.
+			//  This variable is referenced in the same function as where you can find this signature.
+			"CBasePlayer->m_surfaceFriction"
+			{
+				"windows"	"\xF3\x0F\x10\x80\x2A\x2A\x2A\x2A\xF3\x0F\x59\x45\x2A\xF3\x0F\x11\x45"
+				"linux"	    "\xF3\x0F\x10\xB8\x2A\x2A\x2A\x2A\xA1"
 			}
 		}
 	}
 
 	"cstrike"
 	{
+		"Addresses"
+		{
+			"m_surfaceFriction"
+			{
+				"signature" "CBasePlayer->m_surfaceFriction"
+				"read"      "2" // skip the first 2 bytes
+			}
+		}
+
 		"Offsets"
 		{
 			// https://asherkin.github.io/vtable/
@@ -173,12 +205,6 @@
 			{
 				"windows"   "358"
 				"linux"     "359"
-			}
-			// TODO
-			"m_surfaceFriction"
-			{
-				"windows"   "104"
-				"linux"     "104"
 			}
 			// find in CCSGameMovement::CheckForLadders which references CCSPlayer::CanGrabLadder
 			"CCSPlayer::m_lastStandingPos"
@@ -266,6 +292,14 @@
 				"windows"   "\x55\x8B\xEC\x83\xEC\x08\x57\x8B\x7D\x08\x8B\x87\x2A\x2A\x2A\x2A\xD1\xE8\xA8\x01\x0F\x84"
 				"linux"     "@_ZN11CBaseEntity24PhysicsRemoveTouchedListEPS_"
 			}
+			// look for function CGameMovement::CategorizePosition
+			// and you will see something something *(_DWORD*)(a1[1] + some_offset) = 0x3F800000
+			// make a signature at "mov dword ptr[eax+some_offset], 3F800000h"
+			"CBasePlayer->m_surfaceFriction"
+			{
+				"windows"	"\xC7\x80\x2A\x2A\x2A\x2A\x2A\x2A\x2A\x2A\x8B\x07\xFF\x90"
+				"linux"	    "\xC7\x80\x2A\x2A\x2A\x2A\x2A\x2A\x2A\x2A\x8B\x03\x89\x1C\x24\xFF\x90\x2A\x2A\x2A\x2A\x8B\x53\x04"
+			}
 		}
 	}
 
@@ -276,8 +310,8 @@
 			// https://asherkin.github.io/vtable/
 			"CBaseTrigger::PassesTriggerFilters"
 			{
-				"windows"   "204"
-				"linux"     "205"
+				"windows"   "207"
+				"linux"     "208"
 			}
 			// https://asherkin.github.io/vtable/
 			"CGameRules::IsSpawnPointValid"
@@ -288,13 +322,20 @@
 			// https://asherkin.github.io/vtable/
 			"CBasePlayer::UpdateStepSound"
 			{
-				"windows"   "365"
-				"linux"     "366"
+				"windows"   "368"
+				"linux"     "369"
 			}
 		}
 
 		"Signatures"
 		{
+			// search string: "BumperCar.Jump" to find CTFGameMovement::CheckJumpButton.
+			// Then the call to PreventBunnyJumping is right above the string reference somewhere...
+			"CTFGameMovement::PreventBunnyJumping"
+			{
+				"windows"  "\x56\x8B\xF1\x6A\x52\x8B\x8E\x2A\x2A\x2A\x2A\x81\xC1\xE0\x1A\x00\x00\xE8\x2A\x2A\x2A\x2A\x84\xC0\x75"
+				"linux"    "@_ZN15CTFGameMovement19PreventBunnyJumpingEv"
+			}
 			// search string: "Usage:  setang_exact pitch yaw" to find setang_exact's handler. Then the last function call in the handler is DoAnimationEvent.
 			"Player::DoAnimationEvent"
 			{
@@ -317,7 +358,7 @@
 			// Find PhysicsCheckForEntityUntouch by checking the functions that call PhysicsRemoveToucher.
 			"PhysicsCheckForEntityUntouch"
 			{
-				"windows"   "\x55\x8B\xEC\x83\xEC\x08\x56\x8B\xF1\x8B\x86\x2A\x2A\x2A\x2A\xD1\xE8"
+				"windows"   "\x55\x8B\xEC\x51\x56\x8B\xF1\x8B\x86\x2A\x2A\x2A\x2A\xD1\xE8\xA8\x01"
 				"linux"     "@_ZN11CBaseEntity28PhysicsCheckForEntityUntouchEv"
 			}
 			// search string: "scoreboard_minigame"
@@ -330,7 +371,7 @@
 			// function with one argument is PhysicsRemoveTouchedList
 			"PhysicsRemoveTouchedList"
 			{
-				"windows"   "\x55\x8B\xEC\x83\xEC\x08\x57\x8B\x7D\x08\x8B\x87\x2A\x2A\x2A\x2A\xD1\xE8\xA8\x01\x0F\x84"
+				"windows"   "\x55\x8B\xEC\x83\xEC\x08\x53\x8B\x5D\x2A\x8B\x83"
 				"linux"     "@_ZN11CBaseEntity24PhysicsRemoveTouchedListEPS_"
 			}
 		}
