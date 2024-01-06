@@ -11,6 +11,11 @@
 		"#format"	"{1:d}"
 		"en"		"Tier {1}"
 	}
+	"HudInStartZoneimretardedandafaggot"
+	{
+		"#format"	"{1:0.f},{2:d},{3:d},{4:d}"
+		"en"		"In Start Zone\nPoints: {1}\nRank: {2}/{3}\n\n{4}"
+	}
 	"HudInStartZone"
 	{
 		"#format"	"{1:d}"
@@ -39,6 +44,10 @@
 	{
 		"#format"	"{1:d}"
 		"en"		"In End Zone"
+	"HudInEndZoneimretardedandafaggot"
+	{
+		"#format"	"{1:0.f},{2:d},{3:d},{4:d}"
+		"en"		"In End Zone\nPoints: {1}\nRank: {2}/{3}\n\n{4}"
 	}
 	"HudInEndZoneCSGO"
 	{
@@ -55,7 +64,7 @@
 	}
 	"HudBestText"
 	{
-		"en"		"Best"
+		"en"		"PB"
 	}
 	"HudJumpsText"
 	{

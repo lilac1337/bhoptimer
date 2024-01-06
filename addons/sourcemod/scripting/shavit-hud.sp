@@ -1311,7 +1311,15 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 			AddHUDLine(buffer, maxlen, sLine, iLines);
 		}
 
-		if(data.iZoneHUD == ZoneHUD_Start)
+		if(data.iZoneHUD == ZoneHUD_Start && !(Shavit_GetPoints(GetSpectatorTarget(client, client)) == 0.0))
+		{
+			FormatEx(sLine, 128, "%T ", "HudInStartZoneimretardedandafaggot", client, Shavit_GetPoints(GetSpectatorTarget(client, client)), Shavit_GetRank(GetSpectatorTarget(client, client)), Shavit_GetRankedPlayers(), data.iSpeed);
+		}
+		else if(!(Shavit_GetPoints(GetSpectatorTarget(client, client)) == 0.0)) 
+		{
+			FormatEx(sLine, 128, "%T ", "HudInEndZoneimretardedandafaggot", client, Shavit_GetPoints(GetSpectatorTarget(client, client)), Shavit_GetRank(GetSpectatorTarget(client, client)), Shavit_GetRankedPlayers(), data.iSpeed);
+		}
+		else if(data.iZoneHUD == ZoneHUD_Start)
 		{
 			FormatEx(sLine, 128, "%T ", (gI_HUD2Settings[client] & HUD2_SPEED) ? "HudInStartZoneNoSpeed" : "HudInStartZone", client, data.iSpeed);
 		}
@@ -1320,7 +1328,14 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 			FormatEx(sLine, 128, "%T ", (gI_HUD2Settings[client] & HUD2_SPEED) ? "HudInEndZoneNoSpeed" : "HudInEndZone", client, data.iSpeed);
 		}
 
+		/*if(!Shavit_GetPoints(client) == 0.0) 
+		{
+			FormatEx(sLine, 128, "Rank: %i/%i", Shavit_GetRank(client), Shavit_GetRankedPlayers());
+			AddHUDLine(buffer, maxlen, sLine, iLines);
+		}*/
+		
 		AddHUDLine(buffer, maxlen, sLine, iLines);
+		
 		return iLines;
 	}
 
@@ -1340,7 +1355,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 		if((gI_HUD2Settings[client] & HUD2_TIME) == 0)
 		{
 			char sTime[32];
-			FormatSeconds(data.fTime, sTime, 32, false);
+			FormatSecondsHud(data.fTime, sTime, 32, true);
 
 			char sTimeDiff[32];
 
@@ -1423,6 +1438,12 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 			AddHUDLine(buffer, maxlen, sLine, iLines);
 		}
 	}
+	
+	if(data.iTimerStatus != Timer_Stopped && (gI_HUD2Settings[client] & HUD2_TIMEDIFFERENCE) == 0 && data.fClosestReplayTime != -1.0)
+	{
+		FormatEx(sLine, 128, "Run: %.1f％", (((data.fTime - (data.fTime - data.fClosestReplayTime)) / data.fWR) * 100.0));
+		AddHUDLine(buffer, maxlen, sLine, iLines);
+	}	
 
 	if(data.iTimerStatus != Timer_Stopped && data.iTrack != Track_Main && (gI_HUD2Settings[client] & HUD2_TRACK) == 0)
 	{
