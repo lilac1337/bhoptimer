@@ -437,7 +437,7 @@ public SMCResult OnStyleKeyValue(SMCParser smc, const char[] key, const char[] v
 	return SMCParse_Continue;
 }
 
-public int SortAscending_StyleOrder(int index1, int index2, const int[] array, any hndl)
+public int SortAscending_StyleOrder(int index1, int index2, const int[] array, Handle hndl)
 {
 	return GetStyleSettingInt(index1, "ordering") - GetStyleSettingInt(index2, "ordering");
 }
@@ -548,7 +548,6 @@ float GetStyleSettingFloat(int style, char[] key)
 
 public any Native_HasStyleSetting(Handle handler, int numParams)
 {
-	// TODO: replace with sm 1.11 StringMap.ContainsKey
 	int style = GetNativeCell(1);
 
 	char sKey[SS_KEY_SZ];
@@ -559,8 +558,7 @@ public any Native_HasStyleSetting(Handle handler, int numParams)
 
 bool HasStyleSetting(int style, char[] key)
 {
-	int value[1];
-	return gSM_StyleKeys[style].GetArray(key, value, 1);
+	return gSM_StyleKeys[style].ContainsKey(key);
 }
 
 bool SetStyleSetting(int style, const char[] key, const char[] value, bool replace=true)

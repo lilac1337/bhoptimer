@@ -140,6 +140,7 @@ Convar gCV_EnforceTracks = null;
 Convar gCV_BoxOffset = null;
 Convar gCV_ExtraSpawnHeight = null;
 Convar gCV_PrebuiltVisualOffset = null;
+Convar gCV_EnableStageRestart = null;
 
 Convar gCV_ForceTargetnameReset = null;
 Convar gCV_ResetTargetnameMain = null;
@@ -191,6 +192,7 @@ bool gB_AdminMenu = false;
 #define CZONE_VER 'c'
 // custom zone stuff
 Cookie gH_CustomZoneCookie = null;
+Cookie gH_CustomZoneCookie2 = null; // fuck
 int gI_ZoneDisplayType[MAXPLAYERS+1][ZONETYPES_SIZE][TRACKS_SIZE];
 int gI_ZoneColor[MAXPLAYERS+1][ZONETYPES_SIZE][TRACKS_SIZE];
 int gI_ZoneWidth[MAXPLAYERS+1][ZONETYPES_SIZE][TRACKS_SIZE];
@@ -275,6 +277,10 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_stage", Command_Stages, "Opens the stage menu. Usage: sm_stage [stage #]");
 	RegConsoleCmd("sm_s", Command_Stages, "Opens the stage menu. Usage: sm_s [stage #]");
 
+	RegConsoleCmd("sm_rs", Command_StageRestart, "Teleports the player to the current stage. Only works on surf maps.");
+	RegConsoleCmd("sm_stagerestart", Command_StageRestart, "Teleports the player to the current stage. Only works on surf maps.");
+	RegConsoleCmd("sm_restartstage", Command_StageRestart, "Teleports the player to the current stage. Only works on surf maps.");
+
 	RegConsoleCmd("sm_set", Command_SetStart, "Set current position as spawn location in start zone.");
 	RegConsoleCmd("sm_setstart", Command_SetStart, "Set current position as spawn location in start zone.");
 	RegConsoleCmd("sm_ss", Command_SetStart, "Set current position as spawn location in start zone.");
@@ -295,6 +301,7 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_customzones", Command_CustomZones, "Customize start and end zone for each track");
 
 	gH_CustomZoneCookie = new Cookie("shavit_customzones", "Cookie for storing custom zone stuff", CookieAccess_Private);
+	gH_CustomZoneCookie2 = new Cookie("shavit_customzones2", "Cooke (AGAIN) for storing custom zone stuff", CookieAccess_Private);
 
 	for (int i = 0; i <= 9; i++)
 	{
@@ -336,6 +343,7 @@ public void OnPluginStart()
 	gCV_BoxOffset = new Convar("shavit_zones_box_offset", "1", "Offset zone trigger boxes to the center of a player's bounding box or the edges.\n0 - triggers when edges of the bounding boxes touch.\n1 - triggers when the center of a player is in a zone.", 0, true, 0.0, true, 1.0);
 	gCV_ExtraSpawnHeight = new Convar("shavit_zones_extra_spawn_height", "0.0", "YOU DONT NEED TO TOUCH THIS USUALLY. FIX YOUR ACTUAL ZONES.\nUsed to fix some shit prebuilt zones that are in the ground like bhop_strafecontrol");
 	gCV_PrebuiltVisualOffset = new Convar("shavit_zones_prebuilt_visual_offset", "0", "YOU DONT NEED TO TOUCH THIS USUALLY.\nUsed to fix the VISUAL beam offset for prebuilt zones on a map.\nExample maps you'd want to use 16 on: bhop_tranquility and bhop_amaranthglow");
+	gCV_EnableStageRestart = new Convar("shavit_zones_enable_stage_restart", "1", "Whether clients can use !stagerestart/!restartstage/!rs to restart to the current stage zone. Currently only available for `surf_` maps.", 0, true, 0.0, true, 1.0);
 
 	gCV_ForceTargetnameReset = new Convar("shavit_zones_forcetargetnamereset", "0", "Reset the player's targetname upon timer start?\nRecommended to leave disabled. Enable via per-map configs when necessary.\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
 	gCV_ResetTargetnameMain = new Convar("shavit_zones_resettargetname_main", "", "What targetname to use when resetting the player.\nWould be applied once player teleports to the start zone or on every start if shavit_zones_forcetargetnamereset cvar is set to 1.\nYou don't need to touch this");
@@ -612,6 +620,7 @@ public void OnConVarChanged(ConVar convar, const char[] oldValue, const char[] n
 		}
 
 		if (convar.BoolValue) add_prebuilts_to_cache("func_button", true);
+		if (convar.BoolValue) add_prebuilts_to_cache("func_rot_button", true);
 	}
 }
 
@@ -901,8 +910,7 @@ public any Native_AddZone(Handle plugin, int numParams)
 		}
 	}
 
-	// normalize zone points...
-	FillBoxMinMax(cache.fCorner1, cache.fCorner2, cache.fCorner1, cache.fCorner2);
+	BoxPointsToMinsMaxs(cache.fCorner1, cache.fCorner2, cache.fCorner1, cache.fCorner2);
 
 	gA_ZoneCache[gI_MapZones] = cache;
 
@@ -1001,6 +1009,8 @@ bool JumpToZoneType(KeyValues kv, int type, int track)
 		{"No Timer Gravity", ""},
 		{"Gravity", ""},
 		{"Speedmod", ""},
+		{"No Jump", ""},
+		{"Autobhop", ""},
 	};
 
 	char key[4][50];
@@ -1212,6 +1222,7 @@ public void Shavit_LoadZonesHere()
 	if (gCV_ClimbButtons.BoolValue)
 	{
 		add_prebuilts_to_cache("func_button", true);
+		add_prebuilts_to_cache("func_rot_button", true);
 	}
 }
 
@@ -1322,6 +1333,7 @@ public void OnGameFrame()
 	if (search_func_button)
 	{
 		FindEntitiesToHook("func_button", ZoneForm_func_button);
+		FindEntitiesToHook("func_rot_button", ZoneForm_func_button);
 	}
 }
 
@@ -1494,6 +1506,8 @@ bool CreateZoneTrigger(int zone)
 	{
 		SetEntProp(entity, Prop_Send, "m_usSolidFlags",
 			GetEntProp(entity, Prop_Send, "m_usSolidFlags") & ~(FSOLID_TRIGGER|FSOLID_NOT_SOLID));
+
+		EntityCollisionRulesChanged(entity);
 	}
 
 	TeleportEntity(entity, gV_ZoneCenter[zone], NULL_VECTOR, NULL_VECTOR);
@@ -1770,8 +1784,10 @@ public void OnClientCookiesCached(int client)
 	gH_DrawAllZonesCookie.Get(client, setting, sizeof(setting));
 	gB_DrawAllZones[client] = view_as<bool>(StringToInt(setting));
 
-	char czone[100]; // #define MAX_VALUE_LENGTH 100
-	gH_CustomZoneCookie.Get(client, czone, sizeof(czone));
+	// we have to go through some pain because cookies can only fit into a char[100] buffer...
+	char czone[200];
+	gH_CustomZoneCookie.Get(client, czone, 100);
+	gH_CustomZoneCookie2.Get(client, czone[99], 100);
 
 	char ver = czone[0];
 
@@ -1803,7 +1819,7 @@ public void OnClientCookiesCached(int client)
 	else if (ver == 'c') // back to the original :pensive:
 	{
 		// c = [1 + ZONETYPES_SIZE*2*3 + 1] // version = (ZONETYPES_SIZE * (main+bonus) * 3 chars) + NUL terminator
-		// char[98] as of right now....
+		// char[109] as of right now....
 
 		int p = 1;
 
@@ -2291,6 +2307,14 @@ public Action Command_ReloadZoneSettings(int client, int args)
 	return Plugin_Handled;
 }
 
+// Was originally used in beamer to replicate this gmod lua code:
+/*
+My code from tracegun.lua that I based this off of:
+	local ang = tr.Normal:Angle() // calculate in SP with: ( traceRes.HitPos - traceRes.StartPos ):Normalize()
+	ang:RotateAroundAxis(tr.HitNormal, 180)
+	local dir = ang:Forward()*-1
+	tr = util.TraceLine({start=tr.HitPos, endpos=tr.HitPos+(dir*100000), filter=players})
+*/
 stock void RotateAroundAxis(float v[3], const float in_k[3], float theta)
 {
 	// https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula#Statement
@@ -2317,6 +2341,23 @@ stock void RotateAroundAxis(float v[3], const float in_k[3], float theta)
 	}
 }
 
+stock void ReflectAngles(float direction[3], const float normal[3])
+{
+	float fwd[3], reflected[3];
+
+	GetAngleVectors(direction, fwd, NULL_VECTOR, NULL_VECTOR);
+
+	float dot = GetVectorDotProduct(fwd, normal);
+
+	for (int i = 0; i < 3; i++)
+	{
+		reflected[i] = fwd[i] - 2.0 * dot * normal[i];
+	}
+
+	NormalizeVector(reflected, reflected);
+	GetVectorAngles(reflected, direction);
+}
+
 public Action Command_Beamer(int client, int args)
 {
 	static float rate_limit[MAXPLAYERS+1];
@@ -2336,15 +2377,6 @@ public Action Command_Beamer(int client, int args)
 
 	for (int C = 20; C >= 0; --C)
 	{
-		/*
-		My code from tracegun.lua that I based this off of:
-			local ang = tr.Normal:Angle() // ( traceRes.HitPos - traceRes.StartPos ):Normalize()
-			ang:RotateAroundAxis(tr.HitNormal, 180)
-			local dir = ang:Forward()*-1
-
-			tr = util.TraceLine({start=tr.HitPos, endpos=tr.HitPos+(dir*100000), filter=players})
-		*/
-
 		TR_TraceRayFilter(startpos, direction, MASK_ALL, RayType_Infinite, TRFilter_NoPlayers, client);
 		TR_GetEndPosition(endpos);
 
@@ -2369,16 +2401,12 @@ public Action Command_Beamer(int client, int args)
 
 		if (!C) break;
 
-		SubtractVectors(endpos, startpos, direction);
-		NormalizeVector(direction, direction);
-		GetVectorAngles(direction, direction);
-
 		startpos = endpos;
 
 		float hitnormal[3];
 		TR_GetPlaneNormal(INVALID_HANDLE, hitnormal);
 
-		RotateAroundAxis(direction, hitnormal, 180.0);
+		ReflectAngles(direction, hitnormal);
 	}
 
 	return Plugin_Handled;
@@ -2461,6 +2489,63 @@ public Action Command_Stages(int client, int args)
 
 	return Plugin_Handled;
 }
+
+public Action Command_StageRestart(int client, int args)
+{
+	// This command should only work on surf maps for now
+	// There are quite a few bhop maps that have checkpoint triggers and this command would ruin those maps
+	// Ideally there would be a zone-based solution to this problem
+	if(!IsValidClient(client) || strncmp(gS_Map, "surf_", 5))
+	{
+		return Plugin_Handled;
+	}
+
+	if (!gCV_EnableStageRestart.BoolValue)
+	{
+		Shavit_PrintToChat(client, "!stagerestart is disabled!"); // untranslated strings in 2024...
+		return Plugin_Handled;
+	}
+
+	if(!IsPlayerAlive(client))
+	{
+		Shavit_PrintToChat(client, "%T", "StageCommandAlive", client);
+		return Plugin_Handled;
+	}
+
+	int last = gI_LastStage[client];
+	int track = Shavit_GetClientTrack(client);
+
+	// crude way to prevent cheesing
+	if (InsideZone(client, Zone_Stage, track) || InsideZone(client, Zone_Start, -1))
+	{
+		return Plugin_Handled;
+	}
+
+	if (last <= 0 || Shavit_GetTimerStatus(client) == Timer_Stopped || InsideZone(client, Zone_End, track))
+	{
+		Shavit_RestartTimer(client, track);
+	}
+	else
+	{
+		for(int i = 0; i < gI_MapZones; i++)
+		{
+			if (gA_ZoneCache[i].iType == Zone_Stage && gA_ZoneCache[i].iData == last && gA_ZoneCache[i].iTrack == track)
+			{
+				if (!EmptyVector(gA_ZoneCache[i].fDestination))
+				{
+					TeleportEntity(client, gA_ZoneCache[i].fDestination, NULL_VECTOR, view_as<float>({0.0, 0.0, 0.0}));
+				}
+				else
+				{
+					TeleportEntity(client, gV_ZoneCenter[i], NULL_VECTOR, view_as<float>({0.0, 0.0, 0.0}));
+				}
+			}
+		}
+	}
+
+	return Plugin_Handled;
+}
+
 
 public int MenuHandler_SelectStage(Menu menu, MenuAction action, int param1, int param2)
 {
@@ -2732,6 +2817,9 @@ public int MenuHandler_HookZone_Editor(Menu menu, MenuAction action, int param1,
 				| (1 << Zone_Stage)
 				| (1 << Zone_NoTimerGravity)
 				| (1 << Zone_Gravity)
+				| (1 << Zone_Speedmod)
+				| (1 << Zone_NoJump)
+				| (1 << Zone_Autobhop)
 				// ZoneForm_trigger_teleport
 				, (1 << Zone_End)
 				| (1 << Zone_Respawn)
@@ -2933,6 +3021,23 @@ void OpenHookMenu_List(int client, int form, int pos = 0)
 		list.PushArray(thing);
 	}
 
+	// copy & paste for func_rot_button because it's shrimple and I can't think of how to do it cleanly otherwise right now
+	if (form == ZoneForm_func_button)
+	{
+		while ((ent = FindEntityByClassname(ent, "func_rot_button")) != -1)
+		{
+			if (gI_EntityZone[ent] > -1) continue;
+
+			float ent_origin[3];
+			GetEntPropVector(ent, Prop_Send, "m_vecOrigin", ent_origin);
+
+			ent_list_thing thing;
+			thing.dist = GetVectorDistance(player_origin, ent_origin);
+			thing.ent = ent;
+			list.PushArray(thing);
+		}
+	}
+
 	if (!list.Length)
 	{
 		Shavit_PrintToChat(client, "No unhooked entities found");
@@ -2983,7 +3088,7 @@ bool TeleportFilter(int entity)
 	char classname[20];
 	GetEntityClassname(entity, classname, sizeof(classname));
 
-	if (StrEqual(classname, "trigger_teleport") || StrEqual(classname, "trigger_multiple") || StrEqual(classname, "func_button"))
+	if (StrEqual(classname, "trigger_teleport") || StrEqual(classname, "trigger_multiple") || StrEqual(classname, "func_button") || StrEqual(classname, "func_rot_button"))
 	{
 		//TR_ClipCurrentRayToEntity(MASK_ALL, entity);
 		gI_CurrentTraceEntity = entity;
@@ -3032,7 +3137,7 @@ public int MenuHandle_HookZone_Form(Menu menu, MenuAction action, int param1, in
 		char classname[32];
 		GetEntityClassname(ent, classname, sizeof(classname));
 
-		if (StrEqual(classname, "func_button"))
+		if (StrEqual(classname, "func_button") || StrEqual(classname, "func_rot_button"))
 		{
 			form = ZoneForm_func_button;
 		}
@@ -3223,7 +3328,7 @@ void OpenCustomZoneMenu(int client, int pos=0)
 	menu.SetTitle("%T", "CustomZone_MainMenuTitle", client);
 
 	// Only start zone and end zone are customizable imo, why do you even want to customize the zones that arent often used/seen???
-#if CZONE_VER == 'b'
+#if CZONE_VER != 'a'
 	for (int i = 0; i <= Track_Bonus; i++)
 	{
 		for (int j = 0; j < ZONETYPES_SIZE; j++)
@@ -3335,7 +3440,7 @@ void OpenSubCustomZoneMenu(int client, int track, int zoneType)
 
 void HandleCustomZoneCookie(int client)
 {
-	char buf[100]; // #define MAX_VALUE_LENGTH 100
+	char buf[200];
 	int p = 0;
 
 #if CZONE_VER >= 'b'
@@ -3365,7 +3470,10 @@ void HandleCustomZoneCookie(int client)
 		}
 	}
 
+	Format(buf[100], 100, "%s", buf[99]); // shift that bitch over...
+	buf[99] = 0;
 	gH_CustomZoneCookie.Set(client, buf);
+	gH_CustomZoneCookie2.Set(client, buf[100]);
 }
 
 public int MenuHandler_SubCustomZones(Menu menu, MenuAction action, int client, int param2)
@@ -3927,7 +4035,8 @@ public bool TraceFilter_World(int entity, int contentsMask)
 	return (entity == 0);
 }
 
-void FillBoxMinMax(float point1[3], float point2[3], float boxmin[3], float boxmax[3])
+// Sometimes our points aren't mins/maxs... sometimes old DB points... which is not good...
+void BoxPointsToMinsMaxs(float point1[3], float point2[3], float boxmin[3], float boxmax[3])
 {
 	for (int i = 0; i < 3; i++)
 	{
@@ -3973,7 +4082,7 @@ bool InStartOrEndZone(float point1[3], float point2[3], int track, int type)
 
 	if (box)
 	{
-		FillBoxMinMax(point1, point2, amin, amax);
+		BoxPointsToMinsMaxs(point1, point2, amin, amax);
 	}
 
 	for (int i = 0; i < gI_MapZones; i++)
@@ -3985,7 +4094,7 @@ bool InStartOrEndZone(float point1[3], float point2[3], int track, int type)
 		}
 
 		float bmin[3], bmax[3];
-		FillBoxMinMax(gV_MapZones_Visual[i][0], gV_MapZones_Visual[i][7], bmin, bmax);
+		BoxPointsToMinsMaxs(gV_MapZones_Visual[i][0], gV_MapZones_Visual[i][7], bmin, bmax);
 
 		if (box)
 		{
@@ -4442,8 +4551,7 @@ void InsertZone(int client)
 	GetTrackName(LANG_SERVER, c.iTrack, sTrack, sizeof(sTrack));
 	GetZoneName(LANG_SERVER, c.iType, sZoneName, sizeof(sZoneName));
 
-	// normalize zone points...
-	FillBoxMinMax(c.fCorner1, c.fCorner2, c.fCorner1, c.fCorner2);
+	BoxPointsToMinsMaxs(c.fCorner1, c.fCorner2, c.fCorner1, c.fCorner2);
 
 	Reset(client);
 
@@ -4526,21 +4634,8 @@ void InsertZone(int client)
 	}
 
 	DataPack pack = new DataPack();
-	// TODO Sourcemod 1.11 pack.WriteCellArray
-	MyWriteCellArray(pack, c, sizeof(c));
+	pack.WriteCellArray(c, sizeof(c));
 	QueryLog(gH_SQL, SQL_InsertZone_Callback, sQuery, pack);
-}
-
-void MyWriteCellArray(DataPack pack, any[] array, int size)
-{
-	for (int i = 0; i < size; i++)
-		pack.WriteCell(array[i]);
-}
-
-void MyReadCellArray(DataPack pack, any[] array, int size)
-{
-	for (int i = 0; i < size; i++)
-		array[i] = pack.ReadCell();
 }
 
 bool MyArrayEquals(any[] a, any[] b, int size)
@@ -4555,7 +4650,7 @@ public void SQL_InsertZone_Callback(Database db, DBResultSet results, const char
 {
 	zone_cache_t cache;
 	pack.Reset();
-	MyReadCellArray(pack, cache, sizeof(cache));
+	pack.ReadCellArray(cache, sizeof(cache));
 	delete pack;
 
 	if (results == null)
@@ -4815,6 +4910,10 @@ void DrawZone(float points[8][3], int color[4], float life, float width, bool fl
 
 	if (editaxis != -1)
 	{
+		// The is generated with https://gist.github.com/rtldg/94fa32b7abb064e0e99dfbf0c73c1cda
+		// The beam pairs array at the top of this function isn't useful for the order we want
+		// for drawing the editaxis beams so that gist was used to help figure out which
+		// beam indices go where, and then to make a fun little magic string out of it...
 		char magic[] = "\x01\x132\x02EWvF\x04\x15&77&2v\x15\x04\x10T\x13W\x02F7\x151u&\x04 d#g\x01E";
 
 		for (int j = 0; j < 12; j++)

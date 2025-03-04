@@ -58,6 +58,7 @@ bool gB_Protobuf = false;
 // hook stuff
 DynamicHook gH_AcceptInput; // used for hooking player_speedmod's AcceptInput
 DynamicHook gH_TeleportDhook = null;
+Address gI_TF2PreventBunnyJumpingAddr = Address_Null;
 
 // database handle
 Database gH_SQL = null;
@@ -115,6 +116,7 @@ Cookie gH_IHateMain = null;
 
 // late load
 bool gB_Late = false;
+bool gB_Linux = false;
 
 // modules
 bool gB_Eventqueuefix = false;
@@ -289,12 +291,10 @@ public void OnPluginStart()
 	gEV_Type = GetEngineVersion();
 	gB_Protobuf = (GetUserMessageType() == UM_Protobuf);
 
-	if(gEV_Type == Engine_CSGO)
-	{
-		sv_autobunnyhopping = FindConVar("sv_autobunnyhopping");
-		sv_autobunnyhopping.BoolValue = false;
-	}
-	else if(gEV_Type != Engine_CSS && gEV_Type != Engine_TF2)
+	sv_autobunnyhopping = FindConVar("sv_autobunnyhopping");
+	if (sv_autobunnyhopping) sv_autobunnyhopping.BoolValue = false;
+
+	if (gEV_Type != Engine_CSGO && gEV_Type != Engine_CSS && gEV_Type != Engine_TF2)
 	{
 		SetFailState("This plugin was meant to be used in CS:S, CS:GO and TF2 *only*.");
 	}
@@ -477,7 +477,7 @@ public void OnAdminMenuReady(Handle topmenu)
 
 void LoadDHooks()
 {
-	Handle gamedataConf = LoadGameConfigFile("shavit.games");
+	GameData gamedataConf = LoadGameConfigFile("shavit.games");
 
 	if(gamedataConf == null)
 	{
@@ -530,7 +530,9 @@ void LoadDHooks()
 	DHookAddParam(processMovementPost, HookParamType_ObjectPtr);
 	DHookRaw(processMovementPost, true, IGameMovement);
 
-	if (gEV_Type == Engine_TF2)
+	gB_Linux = GameConfGetOffset(gamedataConf, "OS") == 2;
+
+	if (gEV_Type == Engine_TF2 && gB_Linux)
 	{
 		Handle PreventBunnyJumping = DHookCreateDetour(Address_Null, CallConv_THISCALL, ReturnType_Void, ThisPointer_Ignore);
 
@@ -542,6 +544,20 @@ void LoadDHooks()
 		if (!DHookEnableDetour(PreventBunnyJumping, false, DHook_PreventBunnyJumpingPre))
 		{
 			SetFailState("Failed to find CTFGameMovement::PreventBunnyJumping signature");
+		}
+	}
+	else if (gEV_Type == Engine_TF2 && !gB_Linux)
+	{
+		gI_TF2PreventBunnyJumpingAddr = gamedataConf.GetMemSig("CTFGameMovement::PreventBunnyJumping");
+
+		if (gI_TF2PreventBunnyJumpingAddr == Address_Null)
+		{
+			SetFailState("Failed to find CTFGameMovement::PreventBunnyJumping signature");
+		}
+		else
+		{
+			// Write the original JNZ byte but with updateMemAccess=true so we don't repeatedly page-protect it later.
+			StoreToAddress(gI_TF2PreventBunnyJumpingAddr, 0x75, NumberType_Int8, true);
 		}
 	}
 
@@ -2737,7 +2753,7 @@ public void OnClientAuthorized(int client, const char[] auth)
 	}
 
 	char sName[MAX_NAME_LENGTH];
-	SanerGetClientName(client, sName);
+	GetClientName(client, sName, sizeof(sName));
 	ReplaceString(sName, MAX_NAME_LENGTH, "#", "?"); // to avoid this: https://user-images.githubusercontent.com/3672466/28637962-0d324952-724c-11e7-8b27-15ff021f0a59.png
 
 	int iLength = ((strlen(sName) * 2) + 1);
@@ -2877,33 +2893,41 @@ void SQL_DBConnect()
 	SQL_CreateTables(gH_SQL, gS_MySQLPrefix, gI_Driver);
 }
 
-public void Shavit_OnEnterZone(int client, int type, int track, int id, int entity)
+public void Shavit_OnEnterZone(int client, int type, int track, int id, int entity, int data)
 {
-	if(type == Zone_Airaccelerate)
+	if (type == Zone_Airaccelerate && track == gA_Timers[client].iTimerTrack)
 	{
-		gF_ZoneAiraccelerate[client] = float(Shavit_GetZoneData(id));
+		gF_ZoneAiraccelerate[client] = float(data);
+	}
+	else if (type == Zone_CustomSpeedLimit && track == gA_Timers[client].iTimerTrack)
+	{
+		gF_ZoneSpeedLimit[client] = float(data);
+	}
+	else if (type != Zone_Autobhop)
+	{
+		return;
+	}
 
-		UpdateAiraccelerate(client, gF_ZoneAiraccelerate[client]);
-	}
-	else if(type == Zone_CustomSpeedLimit)
-	{
-		gF_ZoneSpeedLimit[client] = float(Shavit_GetZoneData(id));
-	}
+	UpdateStyleSettings(client);
 }
 
 public void Shavit_OnLeaveZone(int client, int type, int track, int id, int entity)
 {
-	if(type == Zone_Airaccelerate)
-	{
-		UpdateAiraccelerate(client, GetStyleSettingFloat(gA_Timers[client].bsStyle, "airaccelerate"));
-	}
+	// TODO: Do we need to do something about clients switching tracks and not having style-related cvars set or anything like that?
+	//       Probably so very niche that it doesn't matter.
+	if (track != gA_Timers[client].iTimerTrack)
+		return;
+	if (type != Zone_Airaccelerate && type != Zone_CustomSpeedLimit && type != Zone_Autobhop)
+		return;
+
+	UpdateStyleSettings(client);
 }
 
 public void PreThinkPost(int client)
 {
 	if(IsPlayerAlive(client))
 	{
-		if(!gB_Zones || !Shavit_InsideZone(client, Zone_Airaccelerate, -1))
+		if (!gB_Zones || !Shavit_InsideZone(client, Zone_Airaccelerate, gA_Timers[client].iTimerTrack))
 		{
 			sv_airaccelerate.FloatValue = GetStyleSettingFloat(gA_Timers[client].bsStyle, "airaccelerate");
 		}
@@ -2914,7 +2938,14 @@ public void PreThinkPost(int client)
 
 		if(sv_enablebunnyhopping != null)
 		{
-			sv_enablebunnyhopping.BoolValue = GetStyleSettingBool(gA_Timers[client].bsStyle, "bunnyhopping");
+			if (gB_Zones && Shavit_InsideZone(client, Zone_CustomSpeedLimit, gA_Timers[client].iTimerTrack))
+			{
+				sv_enablebunnyhopping.BoolValue = true;
+			}
+			else
+			{
+				sv_enablebunnyhopping.BoolValue = GetStyleSettingBool(gA_Timers[client].bsStyle, "bunnyhopping");
+			}
 		}
 
 		MoveType mtMoveType = GetEntityMoveType(client);
@@ -3061,6 +3092,14 @@ public MRESReturn DHook_ProcessMovement(Handle hParams)
 {
 	int client = DHookGetParam(hParams, 1);
 	gI_ClientProcessingMovement = client;
+
+	if (gI_TF2PreventBunnyJumpingAddr != Address_Null)
+	{
+		if (GetStyleSettingBool(gA_Timers[client].bsStyle, "bunnyhopping"))
+			StoreToAddress(gI_TF2PreventBunnyJumpingAddr, 0xEB, NumberType_Int8, false); // jmp
+		else
+			StoreToAddress(gI_TF2PreventBunnyJumpingAddr, 0x75, NumberType_Int8, false); // jnz
+	}
 
 	// Causes client to do zone touching in movement instead of server frames.
 	// From https://github.com/rumourA/End-Touch-Fix
@@ -3511,7 +3550,14 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	bool bInWater = (GetEntProp(client, Prop_Send, "m_nWaterLevel") >= 2);
 	int iOldButtons = GetEntProp(client, Prop_Data, "m_nOldButtons");
 
-	if (GetStyleSettingBool(gA_Timers[client].bsStyle, "autobhop") && gB_Auto[client] && (buttons & IN_JUMP) > 0 && mtMoveType == MOVETYPE_WALK && !bInWater)
+	if (   gB_Auto[client]
+		&& (buttons & IN_JUMP) > 0
+		&& mtMoveType == MOVETYPE_WALK
+		&& !bInWater
+		&& (   GetStyleSettingBool(gA_Timers[client].bsStyle, "autobhop")
+			|| (gB_Zones && Shavit_InsideZone(client, Zone_Autobhop, gA_Timers[client].iTimerTrack))
+		   )
+	)
 	{
 		SetEntProp(client, Prop_Data, "m_nOldButtons", (iOldButtons &= ~IN_JUMP));
 	}
@@ -3524,6 +3570,12 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	}
 
 	if (bInStart && blockprejump && GetStyleSettingInt(gA_Timers[client].bsStyle, "prespeed") == 0 && (vel[2] > 0 || (buttons & IN_JUMP) > 0))
+	{
+		vel[2] = 0.0;
+		buttons &= ~IN_JUMP;
+	}
+
+	if (gB_Zones && Shavit_InsideZone(client, Zone_NoJump, gA_Timers[client].iTimerTrack))
 	{
 		vel[2] = 0.0;
 		buttons &= ~IN_JUMP;
@@ -3732,12 +3784,34 @@ void TestAngles(int client, float dirangle, float yawdelta, const float vel[3])
 		}
 	}
 
+	// backwards hsw
+	else if((dirangle > 112.5 && dirangle < 157.5) || (dirangle > 202.5 && dirangle < 247.5))
+	{
+		gA_Timers[client].iTotalMeasures++;
+
+		if((yawdelta != 0.0) && (vel[0] >= 100.0 || vel[1] >= 100.0) && (vel[0] >= -100.0 || vel[1] >= -100.0))
+		{
+			gA_Timers[client].iGoodGains++;
+		}
+	}
+
 	// sw
 	else if((dirangle > 67.5 && dirangle < 112.5) || (dirangle > 247.5 && dirangle < 292.5))
 	{
 		gA_Timers[client].iTotalMeasures++;
 
 		if(vel[0] <= -100.0 || vel[0] >= 100.0)
+		{
+			gA_Timers[client].iGoodGains++;
+		}
+	}
+
+	// backwards
+	else if(dirangle > 157.5 || dirangle < 202.5)
+	{
+		gA_Timers[client].iTotalMeasures++;
+
+		if((yawdelta > 0.0 && vel[1] <= -100.0) || (yawdelta < 0.0 && vel[1] >= 100.0))
 		{
 			gA_Timers[client].iGoodGains++;
 		}
@@ -3761,13 +3835,37 @@ void UpdateStyleSettings(int client)
 {
 	if(sv_autobunnyhopping != null)
 	{
-		sv_autobunnyhopping.ReplicateToClient(client, (GetStyleSettingBool(gA_Timers[client].bsStyle, "autobhop") && gB_Auto[client])? "1":"0");
+		sv_autobunnyhopping.ReplicateToClient(client,
+			(
+				gB_Auto[client]
+				&&
+				(
+					GetStyleSettingBool(gA_Timers[client].bsStyle, "autobhop")
+				    || (gB_Zones && Shavit_InsideZone(client, Zone_Autobhop, gA_Timers[client].iTimerTrack))
+				)
+			)
+			? "1":"0"
+		);
 	}
 
 	if(sv_enablebunnyhopping != null)
 	{
-		sv_enablebunnyhopping.ReplicateToClient(client, (GetStyleSettingBool(gA_Timers[client].bsStyle, "bunnyhopping"))? "1":"0");
+		if (gB_Zones && Shavit_InsideZone(client, Zone_CustomSpeedLimit, gA_Timers[client].iTimerTrack))
+		{
+			sv_enablebunnyhopping.ReplicateToClient(client, "1");
+		}
+		else
+		{
+			sv_enablebunnyhopping.ReplicateToClient(client, (GetStyleSettingBool(gA_Timers[client].bsStyle, "bunnyhopping"))? "1":"0");
+		}
 	}
 
-	UpdateAiraccelerate(client, GetStyleSettingFloat(gA_Timers[client].bsStyle, "airaccelerate"));
+	if (gB_Zones && Shavit_InsideZone(client, Zone_Airaccelerate, gA_Timers[client].iTimerTrack))
+	{
+		UpdateAiraccelerate(client, gF_ZoneAiraccelerate[client]);
+	}
+	else
+	{
+		UpdateAiraccelerate(client, GetStyleSettingFloat(gA_Timers[client].bsStyle, "airaccelerate"));
+	}
 }

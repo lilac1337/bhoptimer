@@ -34,6 +34,7 @@
 
 #include <shavit/core>
 #include <shavit/misc>
+#include <shavit/chat-colors>
 
 #undef REQUIRE_PLUGIN
 #include <shavit/chat>
@@ -663,9 +664,10 @@ bool LoadAdvertisementsConfig()
 		ReplaceString(sTempMessage, 300, "{variable2}", gS_ChatStrings.sVariable2);
 		ReplaceString(sTempMessage, 300, "{style}", gS_ChatStrings.sStyle);
 
+		FormatColors(sTempMessage, 300, true, false, gEV_Type == Engine_CSGO, false);
+
 		gA_Advertisements.PushString(sTempMessage);
 	}
-
 	while(kv.GotoNextKey(false));
 
 	delete kv;
@@ -1108,7 +1110,7 @@ public Action Timer_Advertisement(Handle timer)
 			}
 
 			char sName[MAX_NAME_LENGTH];
-			SanerGetClientName(i, sName);
+			GetClientName(i, sName, sizeof(sName));
 			char sTempTempMessage[256];
 			sTempTempMessage = sTempMessage;
 			ReplaceString(sTempTempMessage, 256, "{name}", sName);
@@ -1762,7 +1764,7 @@ public Action Command_ToggleAdverts(int client, int args)
 public Action Command_PrintAdverts(int client, int args)
 {
 	char sName[MAX_NAME_LENGTH];
-	SanerGetClientName(client, sName);
+	GetClientName(client, sName, sizeof(sName));
 
 	for (int i = 0; i < gA_Advertisements.Length; i++)
 	{
@@ -1820,7 +1822,7 @@ public Action Command_Teleport(int client, int args)
 			IntToString(GetClientSerial(i), serial, 16);
 
 			char sName[MAX_NAME_LENGTH];
-			SanerGetClientName(i, sName);
+			GetClientName(i, sName, sizeof(sName));
 
 			menu.AddItem(serial, sName);
 		}

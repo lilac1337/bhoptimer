@@ -45,14 +45,16 @@ enum
 	Zone_NoTimerGravity,	// prevents the timer from setting gravity while inside this zone
 	Zone_Gravity,			// lets you set a specific gravity while inside this zone
 	Zone_Speedmod,			// creates a player_speedmod
+	Zone_NoJump,			// blocks the player from jumping while inside the zone
+	Zone_Autobhop,			// forces autobhop for the player
 	ZONETYPES_SIZE
 };
 
 enum
 {
 	ZF_ForceRender = (1 << 0),
-	ZF_Hammerid    = (1 << 1), // used by ZoneForm_{trigger_{multiple, teleport}, func_button} sometimes
-	ZF_Solid       = (1 << 2), // forces the zone to block people...
+	ZF_Hammerid    = (1 << 1), // used by ZoneForm_{trigger_{multiple, teleport}, func_[rot_]button} sometimes
+	ZF_Solid       = (1 << 2), // forces the zone to physically block people...
 	ZF_Origin      = (1 << 4), // sTarget is the entity's origin formatted as "%X %X %X"
 };
 
@@ -136,6 +138,8 @@ stock void GetZoneName(int client, int zoneType, char[] output, int size)
 		"Zone_NoTimerGravity",
 		"Zone_Gravity",
 		"Zone_Speedmod",
+		"Zone_NoJump",
+		"Zone_Autobhop",
 	};
 
 	if (zoneType < 0 || zoneType >= ZONETYPES_SIZE)

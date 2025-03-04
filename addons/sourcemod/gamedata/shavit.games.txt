@@ -1,6 +1,6 @@
 "Games"
 {
-	// A guide to find most of these signatures and offsets: https://www.youtube.com/watch?v=ekyLf6hu4qI
+	// A guide to find most of these signatures and offsets: https://www.youtube.com/watch?v=ekyLf6hu4qI and another https://www.youtube.com/watch?v=J7eHgK_UYOk
 
 	"#default"
 	{
@@ -74,13 +74,6 @@
 				"linux"     "78"
 				"mac"       "78"
 			}
-			// can be found inside BotAddCommand
-			"WEAPONTYPE_UNKNOWN"
-			{
-				"windows"   "19"
-				"linux"     "19"
-				"mac"       "19"
-			}
 			// search string: "Can't find specific footstep sound!" to find CBasePlayer::PlayStepSound.
 			// then find the vtable from references and CBasePlayer::UpdateStepSound is right before PlayStepSound
 			"CBasePlayer::UpdateStepSound"
@@ -121,12 +114,6 @@
 			{
 				"windows"   "\x55\x8B\xEC\x83\xEC\x14\x89\x4D\x2A\xFF\x15"
 				"linux"     "\x55\x89\xE5\x57\x56\x53\x83\xEC\x2C\xE8\x2A\x2A\x2A\x2A\x84\xC0\x74\x2A\xA1"
-			}
-			// search string: "Error - no profile for '%s' exists."
-			"CCSBotManager::BotAddCommand"
-			{
-				"windows"   "\x55\x8B\xEC\xA1\x2A\x2A\x2A\x2A\x53\x56\x57\x80\x78\x2A\x00"
-				"linux"     "\x55\x89\xE5\x57\x56\x53\x83\xEC\x1C\x8B\x45\x2A\x89\x45\x2A\xA1\x2A\x2A\x2A\x2A\x0F\xB6\x70"
 			}
 			// search string: "remove 0x%p: %s-%s" to find PhysicsRemoveToucher.
 			// Find PhysicsCheckForEntityUntouch by checking the functions that call PhysicsRemoveToucher.
@@ -193,13 +180,6 @@
 				"linux"     "77"
 				"mac"       "77"
 			}
-			// can be found inside BotAddCommand
-			"WEAPONTYPE_UNKNOWN"
-			{
-				"windows"   "9"
-				"linux"     "9"
-				"mac"       "9"
-			}
 			// https://asherkin.github.io/vtable/
 			"CBasePlayer::UpdateStepSound"
 			{
@@ -265,12 +245,6 @@
 				"windows"   "\x55\x8B\xEC\x83\xEC\x08\x57\x8B\xF9\x8B\x07\x8B\x40\x2A\xFF\xD0\x84\xC0\x0F\x84"
 				"linux"     "@_ZN11CGameServer22UpdateHibernationStateEv"
 			}
-			// search string: "Error - no profile for '%s' exists."
-			"CCSBotManager::BotAddCommand"
-			{
-				"windows"   "\x55\x8B\xEC\xA1\x2A\x2A\x2A\x2A\x80\x78\x2A\x00\x75\x2A\x83\xB8\x2A\x2A\x2A\x2A\x00"
-				"linux"     "@_ZN13CCSBotManager13BotAddCommandEibPKc12CSWeaponType17BotDifficultyType"
-			}
 			// search string: "remove 0x%p: %s-%s" to find PhysicsRemoveToucher.
 			// Find PhysicsCheckForEntityUntouch by checking the functions that call PhysicsRemoveToucher.
 			"PhysicsCheckForEntityUntouch"
@@ -331,9 +305,10 @@
 		{
 			// search string: "BumperCar.Jump" to find CTFGameMovement::CheckJumpButton.
 			// Then the call to PreventBunnyJumping is right above the string reference somewhere...
+			// Update 2024-04-18: This fucking bitch got inlined on Windows so this signature is now to the first jump instruction of it to gtfo of doing the velocity stuff. https://i.imgur.com/LDq6Ubo.png
 			"CTFGameMovement::PreventBunnyJumping"
 			{
-				"windows"  "\x56\x8B\xF1\x6A\x52\x8B\x8E\x2A\x2A\x2A\x2A\x81\xC1\xE0\x1A\x00\x00\xE8\x2A\x2A\x2A\x2A\x84\xC0\x75"
+				"windows"  "\x75\x2A\x8B\x47\x2A\x8D\x77\x2A\x0F\x57\xC0"
 				"linux"    "@_ZN15CTFGameMovement19PreventBunnyJumpingEv"
 			}
 			// search string: "Usage:  setang_exact pitch yaw" to find setang_exact's handler. Then the last function call in the handler is DoAnimationEvent.
@@ -345,26 +320,20 @@
 			// search string: "match"
 			"BotManager::MaintainBotQuota"
 			{
-				"windows"   "\x55\x8B\xEC\x81\xEC\x14\x01\x00\x00\xA1"
+				"windows"   "\x55\x8B\xEC\xA1\x2A\x2A\x2A\x2A\x81\xEC\x10\x01\x00\x00\x83\xB8\x2A\x2A\x2A\x2A\x00"
 				"linux"     "@_ZN13CTFBotManager16MaintainBotQuotaEv"
-			}
-			// search string: "CreatePlayerBot: Unable to create bot"
-			"NextBotCreatePlayerBot<CTFBot>"
-			{
-				"windows"   "\x55\x8B\xEC\x56\x57\x68\x2A\x2A\x2A\x2A\xE8"
-				"linux"     "@_Z22NextBotCreatePlayerBotI6CTFBotEPT_PKcb"
 			}
 			// search string: "remove 0x%p: %s-%s" to find PhysicsRemoveToucher.
 			// Find PhysicsCheckForEntityUntouch by checking the functions that call PhysicsRemoveToucher.
 			"PhysicsCheckForEntityUntouch"
 			{
-				"windows"   "\x55\x8B\xEC\x51\x56\x8B\xF1\x8B\x86\x2A\x2A\x2A\x2A\xD1\xE8\xA8\x01"
+				"windows"   "\x55\x8B\xEC\x83\xEC\x08\x57\x8B\xF9\x8B\x87\x2A\x2A\x2A\x2A\xD1\xE8"
 				"linux"     "@_ZN11CBaseEntity28PhysicsCheckForEntityUntouchEv"
 			}
 			// search string: "scoreboard_minigame"
 			"CTFGameRules::CalcPlayerScore"
 			{
-				"windows"   "\x55\x8B\xEC\x56\x8B\x75\x2A\x85\xF6\x75\x2A\x33\xC0\x5E\x5D\xC3\x8B\x56"
+				"windows"   "\x55\x8B\xEC\x57\x8B\x7D\x2A\x85\xFF\x75\x2A\x33\xC0\x5F\x5D\xC3\x8B\x57"
 				"linux"     "@_ZN12CTFGameRules15CalcPlayerScoreEP12RoundStats_tP9CTFPlayer"
 			}
 			// search string: "remove 0x%p: %s-%s (%d-%d) [%d in play, %d max]\n".

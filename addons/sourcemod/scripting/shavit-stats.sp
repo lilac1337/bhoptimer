@@ -217,9 +217,10 @@ public void OnClientConnected(int client)
 {
 	gF_PlaytimeStart[client] = 0.0;
 	gF_PlaytimeStyleStart[client] = 0.0;
-	any empty[STYLE_LIMIT];
-	gF_PlaytimeStyleSum[client] = empty;
-	gB_HavePlaytimeOnStyle[client] = empty;
+	float fempty[STYLE_LIMIT];
+	bool bempty[STYLE_LIMIT];
+	gF_PlaytimeStyleSum[client] = fempty;
+	gB_HavePlaytimeOnStyle[client] = bempty;
 	gB_QueriedPlaytime[client] = false;
 }
 
@@ -672,7 +673,7 @@ public Action Command_MapsDoneLeft(int client, int args)
 
 	if (iSteamID == 0)
 	{
-		SanerGetClientName(target, gS_TargetName[client]);
+		GetClientName(target, gS_TargetName[client], sizeof(gS_TargetName[]));
 		iSteamID = GetSteamAccountID(target);
 	}
 

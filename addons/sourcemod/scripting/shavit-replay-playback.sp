@@ -197,7 +197,6 @@ bot_info_t gA_BotInfo[MAXPLAYERS+1];
 frame_t gA_CachedFrames[MAXPLAYERS+1][2]; // I know it kind of overlaps with the frame_cache_t name stuff...
 
 // hooks and sdkcall stuff
-Handle gH_BotAddCommand = INVALID_HANDLE;
 Handle gH_DoAnimationEvent = INVALID_HANDLE;
 DynamicHook gH_UpdateStepSound = null;
 DynamicDetour gH_MaintainBotQuota = null;
@@ -205,7 +204,6 @@ DynamicDetour gH_UpdateHibernationState = null;
 bool gB_DisableHibernation = false;
 DynamicDetour gH_TeamFull = null;
 bool gB_TeamFullDetoured = false;
-int gI_WEAPONTYPE_UNKNOWN = 123123123;
 int gI_LatestClient = -1;
 bool gB_ExpectingBot = false;
 bot_info_t gA_BotInfo_Temp; // cached when creating a bot so we can use an accurate name in player_connect
@@ -402,6 +400,10 @@ public void OnPluginStart()
 	{
 		FindConVar("tf_bot_count").Flags &= ~FCVAR_NOTIFY; // silence please
 	}
+	else
+	{
+		FindConVar("bot_quota").Flags &= ~FCVAR_NOTIFY; // silence please
+	}
 
 	bot_join_after_player = FindConVar(gEV_Type == Engine_TF2 ? "tf_bot_join_after_player" : "bot_join_after_player");
 
@@ -501,6 +503,16 @@ public void OnPluginStart()
 		{
 			OnAdminMenuReady(gH_AdminMenu);
 		}
+
+		for (int entity = MaxClients+1, last = GetMaxEntities(); entity <= last; ++entity)
+		{
+			if (IsValidEntity(entity))
+			{
+				char classname[64];
+				GetEntityClassname(entity, classname, sizeof(classname));
+				OnEntityCreated(entity, classname);
+			}
+		}
 	}
 
 	for(int i = 1; i < sizeof(gA_BotInfo); i++)
@@ -525,51 +537,6 @@ void LoadDHooks()
 	}
 
 	gB_Linux = (gamedata.GetOffset("OS") == 2);
-
-	if (gEV_Type == Engine_TF2)
-	{
-		StartPrepSDKCall(SDKCall_Static);
-
-		if (!PrepSDKCall_SetFromConf(gamedata, SDKConf_Signature, "NextBotCreatePlayerBot<CTFBot>"))
-		{
-			SetFailState("Failed to get NextBotCreatePlayerBot<CTFBot>");
-		}
-
-		PrepSDKCall_AddParameter(SDKType_String, SDKPass_Pointer);       // const char *name
-		PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);   // bool bReportFakeClient
-		PrepSDKCall_SetReturnInfo(SDKType_CBasePlayer, SDKPass_Pointer); // CTFBot*
-
-		if (!(gH_BotAddCommand = EndPrepSDKCall()))
-		{
-			SetFailState("Unable to prepare SDKCall for NextBotCreatePlayerBot<CTFBot>");
-		}
-	}
-	else
-	{
-		StartPrepSDKCall(gB_Linux ? SDKCall_Raw : SDKCall_Static);
-
-		if (!PrepSDKCall_SetFromConf(gamedata, SDKConf_Signature, "CCSBotManager::BotAddCommand"))
-		{
-			SetFailState("Failed to get CCSBotManager::BotAddCommand");
-		}
-
-		PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);  // int team
-		PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);  // bool isFromConsole
-		PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);  // const char *profileName
-		PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);  // CSWeaponType weaponType
-		PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);  // BotDifficultyType difficulty
-		PrepSDKCall_SetReturnInfo(SDKType_PlainOldData, SDKPass_Plain); // bool
-
-		if (!(gH_BotAddCommand = EndPrepSDKCall()))
-		{
-			SetFailState("Unable to prepare SDKCall for CCSBotManager::BotAddCommand");
-		}
-
-		if ((gI_WEAPONTYPE_UNKNOWN = gamedata.GetOffset("WEAPONTYPE_UNKNOWN")) == -1)
-		{
-			SetFailState("Failed to get WEAPONTYPE_UNKNOWN");
-		}
-	}
 
 	if (!(gH_MaintainBotQuota = DHookCreateDetour(Address_Null, CallConv_THISCALL, ReturnType_Void, ThisPointer_Address)))
 	{
@@ -1785,23 +1752,15 @@ public void Shavit_OnReplaySaved(int client, int style, float time, int jumps, i
 
 int InternalCreateReplayBot()
 {
+	ServerExecute(); // Flush the command buffer...
+
 	gI_LatestClient = -1;
 	gB_ExpectingBot = true;
 
 	if (gEV_Type == Engine_TF2)
 	{
-		int bot = SDKCall(
-			gH_BotAddCommand,
-			"replaybot", // name
-			true // bReportFakeClient
-		);
-
-		if (IsValidClient(bot))
-		{
-			TF2_ChangeClientTeam(bot, TFTeam_Red);
-			TF2_SetPlayerClass(bot, TFClass_Sniper);
-			SetFakeClientConVar(bot, "name", "replaybot");
-		}
+		ServerCommand("tf_bot_add red sniper noquota replaybot");
+		ServerExecute(); // actually execute it...
 	}
 	else
 	{
@@ -1814,36 +1773,14 @@ int InternalCreateReplayBot()
 			mp_randomspawn.IntValue = gCV_DefaultTeam.IntValue;
 		}
 
-		if (gB_Linux)
-		{
-			/*int ret =*/ SDKCall(
-				gH_BotAddCommand,
-				0x10000,                   // thisptr           // unused (sourcemod needs > 0xFFFF though)
-				gCV_DefaultTeam.IntValue,  // team
-				false,                     // isFromConsole
-				0,                         // profileName       // unused
-				gI_WEAPONTYPE_UNKNOWN,     // CSWeaponType      // WEAPONTYPE_UNKNOWN
-				0                          // BotDifficultyType // unused
-			);
-		}
-		else
-		{
-			/*int ret =*/ SDKCall(
-				gH_BotAddCommand,
-				gCV_DefaultTeam.IntValue,  // team
-				false,                     // isFromConsole
-				0,                         // profileName       // unused
-				gI_WEAPONTYPE_UNKNOWN,     // CSWeaponType      // WEAPONTYPE_UNKNOWN
-				0                          // BotDifficultyType // unused
-			);
-		}
+		// There's also bot_join_team that could be used but whatever...
+		ServerCommand("bot_add %s", gCV_DefaultTeam.IntValue == 2 ? "t" : "ct");
+		ServerExecute(); // actually execute it...
 
 		if (mp_randomspawn != null)
 		{
 			mp_randomspawn.IntValue = mp_randomspawn_orig;
 		}
-
-		//bool success = (0xFF & ret) != 0;
 	}
 
 	gB_ExpectingBot = false;
@@ -2205,7 +2142,16 @@ void FormatStyle(const char[] source, int style, bool central, int track, char d
 	else
 	{
 		FormatSeconds(GetReplayLength(style, track, aCache), sTime, 16);
-		GetReplayName(style, track, sName, sizeof(sName));
+
+		if(aCache.bNewFormat)
+		{
+			strcopy(sName, sizeof(sName), aCache.sReplayName);
+		}
+		else
+		{
+			GetReplayName(style, track, sName, sizeof(sName));
+		}
+
 		ReplaceString(temp, sizeof(temp), "{style}", gS_StyleStrings[style].sStyleName);
 		ReplaceString(temp, sizeof(temp), "{styletag}", gS_StyleStrings[style].sClanTag);
 	}
@@ -2861,7 +2807,7 @@ public Action BotEventsStopLogSpam(Event event, const char[] name, bool dontBroa
 	return Plugin_Continue;
 }
 
-public Action Hook_SayText2(UserMsg msg_id, any msg, const int[] players, int playersNum, bool reliable, bool init)
+public Action Hook_SayText2(UserMsg msg_id, Handle msg, const int[] players, int playersNum, bool reliable, bool init)
 {
 	if(!gB_HideNameChange || !gCV_Enabled.BoolValue)
 	{
@@ -2880,12 +2826,12 @@ public Action Hook_SayText2(UserMsg msg_id, any msg, const int[] players, int pl
 
 	if(um == UM_Protobuf)
 	{
-		Protobuf pbmsg = msg;
+		Protobuf pbmsg = view_as<Protobuf>(msg);
 		pbmsg.ReadString("msg_name", sMessage, 24);
 	}
 	else
 	{
-		BfRead bfmsg = msg;
+		BfRead bfmsg = view_as<BfRead>(msg);
 		bfmsg.ReadByte();
 		bfmsg.ReadByte();
 		bfmsg.ReadString(sMessage, 24);
@@ -3622,6 +3568,11 @@ bool FindNextLoop(int &track, int &style, int config)
 	for (int i = 0; i < (TRACKS_SIZE*gI_Styles); i++)
 	{
 		int nextstyle = GetNextBit(style, gA_LoopingBotConfig[config].aStyleMask, gI_Styles);
+
+		if (nextstyle < 0)
+		{
+			return false;
+		}
 
 		if (nextstyle <= style || track == -1)
 		{

@@ -117,7 +117,7 @@ int gI_Offset_m_lastLadderPos = 0;
 public Plugin myinfo =
 {
 	name = "[shavit] Checkpoints",
-	author = "shavit, kidfearless, Nairda, GAMMA CASE, rumour, rtldg, sh4hrazad, Ciallo-Ani, OliviaMourning, Nuko, yupi2",
+	author = "shavit, KiD Fearless, Nairda, GAMMA CASE, rumour, rtldg, sh4hrazad, Ciallo-Ani, OliviaMourning, Nuko, yupi2",
 	description = "Checkpoints for shavit's bhop timer.",
 	version = SHAVIT_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -186,6 +186,7 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_checkpoints", Command_Checkpoints, "Opens the checkpoints menu. Alias for sm_cpmenu.");
 	RegConsoleCmd("sm_save", Command_Save, "Saves a checkpoint.");
 	RegConsoleCmd("sm_tele", Command_Tele, "Teleports to a checkpoint. Usage: sm_tele [number]");
+	RegConsoleCmd("sm_teleport", Command_Tele, "Teleports to a checkpoint. Usage: sm_tele [number]");
 	RegConsoleCmd("sm_prevcp", Command_PrevCheckpoint, "Selects the previous checkpoint.");
 	RegConsoleCmd("sm_nextcp", Command_NextCheckpoint, "Selects the next checkpoint.");
 	RegConsoleCmd("sm_deletecp", Command_DeleteCheckpoint, "Deletes the current checkpoint.");
